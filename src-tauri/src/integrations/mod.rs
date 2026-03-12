@@ -1,9 +1,13 @@
+#[allow(dead_code)]
 pub mod claude_code;
+#[allow(dead_code)]
 pub mod codex;
+#[allow(dead_code)]
 pub mod cursor;
 
 use serde::Serialize;
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Clone)]
 pub struct IntegrationInfo {
     pub name: String,
@@ -15,6 +19,7 @@ pub struct IntegrationInfo {
     pub status: IntegrationStatus,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Clone)]
 pub enum IntegrationStatus {
     Available,
@@ -23,6 +28,7 @@ pub enum IntegrationStatus {
     ComingSoon,
 }
 
+#[allow(dead_code)]
 pub trait Integration {
     fn name(&self) -> &str;
     fn display_name(&self) -> &str;

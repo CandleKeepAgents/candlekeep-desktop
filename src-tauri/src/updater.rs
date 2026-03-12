@@ -182,8 +182,6 @@ pub async fn install_app_update(dmg_url: String, expected_checksum: Option<Strin
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_newer_version_detected() {
         let current = semver::Version::parse("0.1.0").unwrap();

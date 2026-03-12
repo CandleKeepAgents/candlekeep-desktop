@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
+#[allow(unused_imports)]
 use tracing::{warn, error};
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppState {
     pub setup_completed: bool,
@@ -16,6 +18,7 @@ impl Default for AppState {
     }
 }
 
+#[allow(dead_code)]
 impl AppState {
     pub fn load() -> Self {
         let state_path = dirs::home_dir()
