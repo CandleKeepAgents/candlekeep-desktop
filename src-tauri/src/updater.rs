@@ -1,7 +1,7 @@
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::process::Command;
-use tracing::{info, error};
+use tracing::{info, debug, error};
 
 #[derive(Debug, Serialize)]
 pub struct AppUpdateInfo {
@@ -32,7 +32,7 @@ pub async fn check_app_update() -> Result<AppUpdateInfo, String> {
         })?;
 
     if !response.status().is_success() {
-        info!("Update check returned non-success status: {}", response.status());
+        debug!("Update check returned non-success status: {}", response.status());
         return Ok(AppUpdateInfo {
             update_available: false,
             current_version,
