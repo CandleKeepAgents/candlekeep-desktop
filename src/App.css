@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+/* Hide scrollbar visually while preserving scroll */
+* {
+  scrollbar-width: none; /* Firefox */
+}
+*::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/WebKit */
+}
+
+
+html, body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #18181b; /* zinc-900 — prevents click-through on transparent window */
+  height: 100%;
+  overflow: hidden;
+}
