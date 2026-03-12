@@ -5,12 +5,13 @@ interface QuickActionsProps {
   onReAuth: () => void;
   onCheckUpdates: () => void;
   updatesLoading?: boolean;
+  authLoading?: boolean;
 }
 
-export function QuickActions({ onOpenLibrary, onReAuth, onCheckUpdates, updatesLoading }: QuickActionsProps) {
+export function QuickActions({ onOpenLibrary, onReAuth, onCheckUpdates, updatesLoading, authLoading }: QuickActionsProps) {
   const actions = [
     { icon: ExternalLink, label: "Open Library", onClick: onOpenLibrary },
-    { icon: KeyRound, label: "Re-authenticate", onClick: onReAuth },
+    { icon: authLoading ? Loader2 : KeyRound, label: authLoading ? "Authenticating..." : "Re-authenticate", onClick: onReAuth, spinning: authLoading, disabled: authLoading },
     { icon: updatesLoading ? Loader2 : RefreshCw, label: updatesLoading ? "Checking..." : "Check Updates", onClick: onCheckUpdates, spinning: updatesLoading },
   ];
 
@@ -23,7 +24,7 @@ export function QuickActions({ onOpenLibrary, onReAuth, onCheckUpdates, updatesL
             type="button"
             key={action.label}
             onClick={action.onClick}
-            disabled={action.spinning}
+            disabled={action.spinning || action.disabled}
             className="flex flex-col items-center gap-1.5 p-3 rounded-lg bg-zinc-800/50 border border-zinc-700/50 hover:bg-zinc-700/50 transition-colors disabled:opacity-50"
           >
             <action.icon className={`w-4 h-4 text-amber-500 ${action.spinning ? "animate-spin" : ""}`} />

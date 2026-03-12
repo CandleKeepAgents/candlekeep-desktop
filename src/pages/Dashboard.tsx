@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MetricsCard } from "../components/MetricsCard";
 import { QuickActions } from "../components/QuickActions";
 import { StatusCard } from "../components/StatusCard";
@@ -7,7 +7,7 @@ import { UpdateBanner } from "../components/UpdateBanner";
 import { useCliStatus } from "../hooks/useCliStatus";
 import { useMetrics } from "../hooks/useMetrics";
 import { usePluginStatus } from "../hooks/usePluginStatus";
-import { checkAppUpdate, installAppUpdate, triggerAuthLogin, updateCli } from "../lib/tauri-commands";
+import { checkAppUpdate, checkAuthStatus, installAppUpdate, triggerAuthLogin, updateCli } from "../lib/tauri-commands";
 import type { AppUpdateInfo } from "../lib/types";
 
 export function Dashboard() {
@@ -17,6 +17,9 @@ export function Dashboard() {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [appUpdate, setAppUpdate] = useState<AppUpdateInfo | null>(null);
   const [updatingApp, setUpdatingApp] = useState(false);
+  const [authenticating, setAuthenticating] = useState(false);
+  const authPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshAppUpdate = useCallback(async () => {
     try {
@@ -39,12 +42,50 @@ export function Dashboard() {
     }
   };
 
+  const clearAuthPolling = useCallback(() => {
+    if (authPollRef.current) {
+      clearInterval(authPollRef.current);
+      authPollRef.current = null;
+    }
+    if (authTimeoutRef.current) {
+      clearTimeout(authTimeoutRef.current);
+      authTimeoutRef.current = null;
+    }
+  }, []);
+
+  // Cleanup auth polling on unmount
+  useEffect(() => {
+    return () => clearAuthPolling();
+  }, [clearAuthPolling]);
+
   const handleReAuth = async () => {
+    if (authenticating) return;
+    setAuthenticating(true);
+    clearAuthPolling();
     try {
-      const result = await triggerAuthLogin();
-      console.log("Auth result:", result);
+      await triggerAuthLogin();
+      // Poll for auth completion
+      authPollRef.current = setInterval(async () => {
+        try {
+          const auth = await checkAuthStatus();
+          if (auth.authenticated) {
+            clearAuthPolling();
+            setAuthenticating(false);
+            refreshCli();
+            refreshMetrics();
+          }
+        } catch {
+          // Ignore poll errors, will retry
+        }
+      }, 2000);
+      // Stop polling after 5 minutes
+      authTimeoutRef.current = setTimeout(() => {
+        clearAuthPolling();
+        setAuthenticating(false);
+      }, 300000);
     } catch (err) {
       console.error("Failed to trigger auth:", err);
+      setAuthenticating(false);
     }
   };
 
@@ -119,9 +160,9 @@ export function Dashboard() {
         />
         <StatusCard
           title="Authentication"
-          status={cliLoading ? "loading" : authStatus?.authenticated ? "ok" : "error"}
-          detail={authStatus?.authenticated ? "Signed in" : "Not authenticated"}
-          action={!authStatus?.authenticated ? { label: "Sign In", onClick: handleReAuth } : undefined}
+          status={cliLoading ? "loading" : authenticating ? "loading" : authStatus?.authenticated ? "ok" : "error"}
+          detail={authenticating ? "Waiting for authentication..." : authStatus?.authenticated ? "Signed in" : "Not authenticated"}
+          action={!authStatus?.authenticated && !authenticating ? { label: "Sign In", onClick: handleReAuth } : undefined}
         />
         <StatusCard
           title="Claude Code"
@@ -145,6 +186,7 @@ export function Dashboard() {
         onReAuth={handleReAuth}
         onCheckUpdates={handleCheckUpdates}
         updatesLoading={checkingUpdates}
+        authLoading={authenticating}
       />
     </div>
   );

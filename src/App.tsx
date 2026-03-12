@@ -93,7 +93,7 @@ function App() {
         {page === "dashboard" && <Dashboard />}
         {page === "integrations" && <Integrations />}
         {page === "releases" && <ReleaseNotes />}
-        {page === "settings" && <Settings />}
+        {page === "settings" && <Settings onLogout={() => setNeedsSetup(true)} />}
       </main>
 
       {/* Bottom Nav */}

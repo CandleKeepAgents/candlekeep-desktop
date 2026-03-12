@@ -6,7 +6,7 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as cmd from "../lib/tauri-commands";
 import type { SetupStep, SystemCheckResult } from "../lib/types";
 
@@ -22,6 +22,16 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
     status: "pending",
     message: "",
   });
+  const authPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup auth polling on unmount
+  useEffect(() => {
+    return () => {
+      if (authPollRef.current) clearInterval(authPollRef.current);
+      if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+    };
+  }, []);
 
   const runSystemCheck = useCallback(async () => {
     setStepState({ status: "running", message: "Checking your system..." });
@@ -104,27 +114,43 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
   };
 
   const handleAuth = async () => {
+    if (stepState.status === "running") return; // Prevent double-click
     setStepState({ status: "running", message: "Opening browser for authentication..." });
+    // Clear any previous polling
+    if (authPollRef.current) clearInterval(authPollRef.current);
+    if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
     try {
       await cmd.triggerAuthLogin();
       setStepState({ status: "running", message: "Waiting for authentication... check your browser" });
       // Poll auth status
-      const pollAuth = setInterval(async () => {
-        const auth = await cmd.checkAuthStatus();
-        if (auth.authenticated) {
-          clearInterval(pollAuth);
-          setStepState({ status: "success", message: "Authenticated!" });
-          if (!systemCheck?.claudeCodeInstalled) {
-            setCurrentStep("install-claude");
-          } else if (!systemCheck?.pluginInstalled) {
-            setCurrentStep("install-plugin");
-          } else {
-            setCurrentStep("done");
+      authPollRef.current = setInterval(async () => {
+        try {
+          const auth = await cmd.checkAuthStatus();
+          if (auth.authenticated) {
+            if (authPollRef.current) clearInterval(authPollRef.current);
+            if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+            authPollRef.current = null;
+            authTimeoutRef.current = null;
+            setStepState({ status: "success", message: "Authenticated!" });
+            if (!systemCheck?.claudeCodeInstalled) {
+              setCurrentStep("install-claude");
+            } else if (!systemCheck?.pluginInstalled) {
+              setCurrentStep("install-plugin");
+            } else {
+              setCurrentStep("done");
+            }
           }
+        } catch {
+          // Ignore individual poll errors, will retry
         }
       }, 2000);
-      // Stop polling after 5 minutes
-      setTimeout(() => clearInterval(pollAuth), 300000);
+      // Stop polling after 5 minutes with user feedback
+      authTimeoutRef.current = setTimeout(() => {
+        if (authPollRef.current) clearInterval(authPollRef.current);
+        authPollRef.current = null;
+        authTimeoutRef.current = null;
+        setStepState({ status: "error", message: "Authentication timed out. Please try again." });
+      }, 300000);
     } catch (err) {
       setStepState({ status: "error", message: `${err}` });
     }

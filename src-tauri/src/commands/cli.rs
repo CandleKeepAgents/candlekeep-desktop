@@ -227,31 +227,76 @@ pub async fn check_auth_status() -> Result<AuthStatus, String> {
 
 #[tauri::command]
 pub async fn trigger_auth_login() -> Result<String, String> {
-    // Find the ck binary first
-    let ck_path = find_cli_path()
-        .ok_or_else(|| "CandleKeep CLI not found. Please install it first.".to_string())?;
+    // Native auth flow: bind a TCP listener, open browser, wait for callback.
+    // This avoids spawning `ck auth login` which panics (exit 101) when run
+    // from a macOS GUI app due to stdin/stdout handling issues.
 
-    let path_env = get_full_path();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("Failed to start local auth server: {}", e))?;
+    let port = listener.local_addr()
+        .map_err(|e| format!("Failed to get listener port: {}", e))?
+        .port();
 
-    // Spawn ck auth login as a tokio task to properly manage its lifecycle
+    // Read API base URL from config (same logic as CLI)
+    let api_url = get_api_base_url();
+    let auth_url = format!("{}/cli-auth?port={}", api_url, port);
+
+    info!("Opening browser for auth: {}", auth_url);
+
+    // Open browser from the Tauri process (works reliably in GUI context)
+    if let Err(e) = open::that(&auth_url) {
+        warn!("Failed to open browser: {}", e);
+        return Err(format!("Failed to open browser: {}. Visit {} manually.", e, auth_url));
+    }
+
+    // Wait for the OAuth callback in a background task
     tokio::spawn(async move {
-        let result = tokio::process::Command::new(&ck_path)
-            .args(["auth", "login"])
-            .env("PATH", path_env)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .status()
-            .await;
+        listener.set_nonblocking(false).ok();
+        let handle = std::thread::spawn(move || -> Result<String, String> {
+            use std::io::{BufRead, BufReader, Write};
+            // Block until the browser sends the callback (or the listener is dropped)
+            let (mut stream, _) = listener.accept()
+                .map_err(|e| format!("Failed to accept callback: {}", e))?;
 
-        match result {
-            Ok(status) if status.success() => {
-                info!("Auth login process completed successfully");
+            let mut reader = BufReader::new(&stream);
+            let mut request_line = String::new();
+            reader.read_line(&mut request_line)
+                .map_err(|e| format!("Failed to read callback: {}", e))?;
+
+            // Parse: GET /callback?key=ck_xxx HTTP/1.1
+            let api_key = request_line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|path| path.strip_prefix("/callback?key="))
+                .map(|s| s.to_string())
+                .ok_or_else(|| "Invalid callback URL".to_string())?;
+
+            // Send success response to browser
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n\
+                <!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>CandleKeep</title>\
+                <style>body{font-family:-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#1a1a1a;color:#fff}\
+                .c{text-align:center}.s{color:#22c55e;font-size:3rem;margin-bottom:1rem}</style></head>\
+                <body><div class=\"c\"><div class=\"s\">&#x2713;</div><h1>Authentication Successful</h1>\
+                <p style=\"color:#888\">You can close this window.</p></div></body></html>";
+            stream.write_all(response.as_bytes()).ok();
+            stream.flush().ok();
+
+            Ok(api_key)
+        });
+
+        match handle.join() {
+            Ok(Ok(api_key)) => {
+                if let Err(e) = save_api_key_to_config(&api_key) {
+                    error!("Failed to save API key: {}", e);
+                } else {
+                    info!("Auth login completed successfully (native flow)");
+                }
             }
-            Ok(status) => {
-                warn!("Auth login process exited with status: {}", status);
+            Ok(Err(e)) => {
+                error!("Auth callback failed: {}", e);
             }
-            Err(e) => {
-                error!("Auth login process failed: {}", e);
+            Err(_) => {
+                error!("Auth callback handler panicked");
             }
         }
     });
@@ -259,19 +304,90 @@ pub async fn trigger_auth_login() -> Result<String, String> {
     Ok("Auth login started — check your browser".to_string())
 }
 
+/// Read the CandleKeep API base URL from config or use default.
+fn get_api_base_url() -> String {
+    if let Ok(url) = std::env::var("CANDLEKEEP_API_URL") {
+        return url;
+    }
+    let config_path = dirs::home_dir()
+        .map(|h| h.join(".candlekeep/config.toml"));
+    if let Some(path) = config_path {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(config) = content.parse::<toml::Value>() {
+                if let Some(url) = config.get("api").and_then(|a| a.get("url")).and_then(|u| u.as_str()) {
+                    return url.to_string();
+                }
+            }
+        }
+    }
+    "https://www.getcandlekeep.com".to_string()
+}
+
+/// Save API key to ~/.candlekeep/config.toml (same format as CLI).
+fn save_api_key_to_config(api_key: &str) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let config_dir = home.join(".candlekeep");
+    let config_path = config_dir.join("config.toml");
+
+    // Ensure directory exists
+    if !config_dir.exists() {
+        std::fs::create_dir_all(&config_dir)
+            .map_err(|e| format!("Failed to create config dir: {}", e))?;
+    }
+
+    // Load existing config or create default
+    let mut config: toml::Value = if config_path.exists() {
+        let content = std::fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read config: {}", e))?;
+        content.parse().unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()))
+    } else {
+        toml::Value::Table(toml::map::Map::new())
+    };
+
+    // Set auth.api_key
+    let table = config.as_table_mut().ok_or("Config is not a table")?;
+    let auth = table.entry("auth").or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    if let Some(auth_table) = auth.as_table_mut() {
+        auth_table.insert("api_key".to_string(), toml::Value::String(api_key.to_string()));
+    }
+
+    let content = toml::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    std::fs::write(&config_path, content)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn auth_logout() -> Result<String, String> {
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg("ck auth logout")
-        .env("PATH", get_full_path())
-        .output()
-        .map_err(|e| format!("Failed to logout: {}", e))?;
+    // Clear API key directly from config file (same format as CLI).
+    // This avoids spawning a CLI subprocess which can have PATH issues in GUI apps.
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let config_path = home.join(".candlekeep/config.toml");
 
-    if output.status.success() {
-        Ok("Logged out successfully".to_string())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!("Logout failed: {}", stderr))
+    if !config_path.exists() {
+        info!("No config file, already logged out");
+        return Ok("Logged out successfully".to_string());
     }
+
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+    let mut config: toml::Value = content.parse()
+        .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+    // Remove auth.api_key
+    if let Some(table) = config.as_table_mut() {
+        if let Some(auth) = table.get_mut("auth").and_then(|a| a.as_table_mut()) {
+            auth.remove("api_key");
+        }
+    }
+
+    let updated = toml::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    std::fs::write(&config_path, updated)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+
+    info!("User logged out successfully");
+    Ok("Logged out successfully".to_string())
 }
