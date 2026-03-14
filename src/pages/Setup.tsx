@@ -8,7 +8,13 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as cmd from "../lib/tauri-commands";
-import type { SetupStep, SystemCheckResult } from "../lib/types";
+import type {
+  HostKind,
+  PlatformInfo,
+  SetupStep,
+  SystemCheckResult,
+} from "../lib/types";
+import { HOST_DISPLAY_NAMES } from "../lib/types";
 
 interface StepState {
   status: "pending" | "running" | "success" | "error";
@@ -17,7 +23,11 @@ interface StepState {
 
 export function Setup({ onComplete }: { onComplete: () => void }) {
   const [currentStep, setCurrentStep] = useState<SetupStep>("welcome");
-  const [systemCheck, setSystemCheck] = useState<SystemCheckResult | null>(null);
+  const [systemCheck, setSystemCheck] = useState<SystemCheckResult | null>(
+    null,
+  );
+  const [selectedHost, setSelectedHost] = useState<HostKind | null>(null);
+  const [platformInfo, setPlatformInfo] = useState<PlatformInfo | null>(null);
   const [stepState, setStepState] = useState<StepState>({
     status: "pending",
     message: "",
@@ -25,7 +35,6 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
   const authPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Cleanup auth polling on unmount
   useEffect(() => {
     return () => {
       if (authPollRef.current) clearInterval(authPollRef.current);
@@ -33,22 +42,32 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
     };
   }, []);
 
+  // Load platform info on mount
+  useEffect(() => {
+    cmd.getPlatformInfo().then(setPlatformInfo).catch(console.error);
+  }, []);
+
+  const isMacOS = platformInfo?.platform === "macos";
+
   const runSystemCheck = useCallback(async () => {
     setStepState({ status: "running", message: "Checking your system..." });
     try {
-      const [homebrew, cargo, node, xcodeClt, cli, auth, claude, plugin] =
+      const [platform, homebrew, cargo, node, xcodeClt, cli, auth, integrations] =
         await Promise.all([
+          cmd.getPlatformInfo(),
           cmd.checkHomebrew(),
           cmd.checkCargo(),
           cmd.checkNode(),
           cmd.checkXcodeClt(),
           cmd.checkCliInstalled(),
           cmd.checkAuthStatus(),
-          cmd.checkClaudeCodeInstalled(),
-          cmd.checkPluginInstalled(),
+          cmd.listIntegrations(),
         ]);
 
+      setPlatformInfo(platform);
+
       const result: SystemCheckResult = {
+        platform,
         homebrew,
         cargo,
         node,
@@ -56,27 +75,32 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         cliInstalled: cli.installed,
         cliVersion: cli.version,
         authenticated: auth.authenticated,
-        claudeCodeInstalled: claude,
-        pluginInstalled: plugin.installed,
-        pluginVersion: plugin.version,
+        integrations,
       };
 
       setSystemCheck(result);
       setStepState({ status: "success", message: "System check complete" });
 
       // Auto-advance to first needed step
-      if (!result.homebrew) {
+      const isMac = platform.platform === "macos";
+      if (isMac && !result.homebrew) {
         setCurrentStep("install-homebrew");
       } else if (!result.cliInstalled) {
         setCurrentStep("install-cli");
       } else if (!result.authenticated) {
         setCurrentStep("authenticate");
-      } else if (!result.claudeCodeInstalled) {
-        setCurrentStep("install-claude");
-      } else if (!result.pluginInstalled) {
-        setCurrentStep("install-plugin");
       } else {
-        setCurrentStep("done");
+        // Check if selected host integration needs install
+        const hostStatus = selectedHost
+          ? result.integrations.find((i) => i.host === selectedHost)
+          : null;
+        if (hostStatus && !hostStatus.host_installed) {
+          setCurrentStep("install-host");
+        } else if (hostStatus && !hostStatus.integration_installed) {
+          setCurrentStep("install-integration");
+        } else {
+          setCurrentStep("done");
+        }
       }
     } catch (err) {
       setStepState({
@@ -84,14 +108,16 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         message: `System check failed: ${err}`,
       });
     }
-  }, []);
+  }, [selectedHost]);
 
   const handleInstallHomebrew = async () => {
-    setStepState({ status: "running", message: "Installing Homebrew... this may take a few minutes" });
+    setStepState({
+      status: "running",
+      message: "Installing Homebrew... this may take a few minutes",
+    });
     try {
       await cmd.installHomebrew();
       setStepState({ status: "success", message: "Homebrew installed!" });
-      // Move to next step
       if (!systemCheck?.cliInstalled) {
         setCurrentStep("install-cli");
       } else {
@@ -103,7 +129,10 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
   };
 
   const handleInstallCli = async () => {
-    setStepState({ status: "running", message: "Installing CandleKeep CLI..." });
+    setStepState({
+      status: "running",
+      message: "Installing CandleKeep CLI...",
+    });
     try {
       await cmd.installCli();
       setStepState({ status: "success", message: "CLI installed!" });
@@ -114,15 +143,19 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
   };
 
   const handleAuth = async () => {
-    if (stepState.status === "running") return; // Prevent double-click
-    setStepState({ status: "running", message: "Opening browser for authentication..." });
-    // Clear any previous polling
+    if (stepState.status === "running") return;
+    setStepState({
+      status: "running",
+      message: "Opening browser for authentication...",
+    });
     if (authPollRef.current) clearInterval(authPollRef.current);
     if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
     try {
       await cmd.triggerAuthLogin();
-      setStepState({ status: "running", message: "Waiting for authentication... check your browser" });
-      // Poll auth status
+      setStepState({
+        status: "running",
+        message: "Waiting for authentication... check your browser",
+      });
       authPollRef.current = setInterval(async () => {
         try {
           const auth = await cmd.checkAuthStatus();
@@ -132,36 +165,53 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
             authPollRef.current = null;
             authTimeoutRef.current = null;
             setStepState({ status: "success", message: "Authenticated!" });
-            if (!systemCheck?.claudeCodeInstalled) {
-              setCurrentStep("install-claude");
-            } else if (!systemCheck?.pluginInstalled) {
-              setCurrentStep("install-plugin");
+
+            // Check host integration status
+            if (selectedHost) {
+              const status = await cmd.checkIntegration(selectedHost);
+              if (!status.host_installed) {
+                setCurrentStep("install-host");
+              } else if (!status.integration_installed) {
+                setCurrentStep("install-integration");
+              } else {
+                setCurrentStep("done");
+              }
             } else {
               setCurrentStep("done");
             }
           }
         } catch {
-          // Ignore individual poll errors, will retry
+          // Ignore poll errors
         }
       }, 2000);
-      // Stop polling after 5 minutes with user feedback
       authTimeoutRef.current = setTimeout(() => {
         if (authPollRef.current) clearInterval(authPollRef.current);
         authPollRef.current = null;
         authTimeoutRef.current = null;
-        setStepState({ status: "error", message: "Authentication timed out. Please try again." });
+        setStepState({
+          status: "error",
+          message: "Authentication timed out. Please try again.",
+        });
       }, 300000);
     } catch (err) {
       setStepState({ status: "error", message: `${err}` });
     }
   };
 
-  const handleInstallPlugin = async () => {
-    setStepState({ status: "running", message: "Installing CandleKeep plugin..." });
+  const handleInstallIntegration = async () => {
+    if (!selectedHost) return;
+    setStepState({
+      status: "running",
+      message: `Installing CandleKeep for ${HOST_DISPLAY_NAMES[selectedHost]}...`,
+    });
     try {
-      await cmd.installPlugin();
-      setStepState({ status: "success", message: "Plugin installed!" });
-      setCurrentStep("done");
+      const result = await cmd.installIntegration(selectedHost);
+      if (result.ok) {
+        setStepState({ status: "success", message: result.message });
+        setCurrentStep("done");
+      } else {
+        setStepState({ status: "error", message: result.message });
+      }
     } catch (err) {
       setStepState({ status: "error", message: `${err}` });
     }
@@ -180,6 +230,7 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
     }
   };
 
+  // --- Welcome screen ---
   if (currentStep === "welcome") {
     return (
       <div className="flex flex-col items-center justify-center min-h-[500px] text-center space-y-6 px-6">
@@ -191,16 +242,13 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
             Welcome to CandleKeep
           </h1>
           <p className="text-sm text-zinc-400 max-w-xs">
-            Let's set up everything you need to access your document library
-            from your AI coding tools.
+            Let&apos;s set up everything you need to access your document
+            library from your AI coding tools.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => {
-            setCurrentStep("system-check");
-            runSystemCheck();
-          }}
+          onClick={() => setCurrentStep("host-picker")}
           className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium transition-colors"
         >
           Get Started
@@ -210,6 +258,45 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
     );
   }
 
+  // --- Host picker screen ---
+  if (currentStep === "host-picker") {
+    const hosts: HostKind[] = ["claude_code", "cursor", "codex", "amp"];
+    return (
+      <div className="space-y-6 px-2">
+        <h2 className="text-lg font-semibold text-zinc-100">
+          Choose Your AI Tool
+        </h2>
+        <p className="text-xs text-zinc-400">
+          Select the AI coding tool you want to connect with CandleKeep.
+        </p>
+        <div className="space-y-2">
+          {hosts.map((host) => (
+            <button
+              type="button"
+              key={host}
+              onClick={() => {
+                setSelectedHost(host);
+                setCurrentStep("system-check");
+                // Trigger system check after state update
+                setTimeout(() => runSystemCheck(), 0);
+              }}
+              className={`w-full p-4 rounded-lg border transition-colors text-left ${
+                selectedHost === host
+                  ? "border-amber-500 bg-amber-600/10"
+                  : "border-zinc-700/50 bg-zinc-800/50 hover:border-zinc-600"
+              }`}
+            >
+              <h4 className="text-sm font-medium text-zinc-100">
+                {HOST_DISPLAY_NAMES[host]}
+              </h4>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // --- Done screen ---
   if (currentStep === "done") {
     return (
       <div className="flex flex-col items-center justify-center min-h-[500px] text-center space-y-6 px-6">
@@ -218,11 +305,12 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         </div>
         <div>
           <h1 className="text-xl font-bold text-zinc-100 mb-2">
-            You're all set!
+            You&apos;re all set!
           </h1>
           <p className="text-sm text-zinc-400 max-w-xs">
-            CandleKeep is ready to use. Your library is now accessible from
-            Claude Code.
+            CandleKeep is ready to use.
+            {selectedHost &&
+              ` Your library is now accessible from ${HOST_DISPLAY_NAMES[selectedHost]}.`}
           </p>
         </div>
         <button
@@ -237,6 +325,7 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
     );
   }
 
+  // --- Step-based screens ---
   return (
     <div className="space-y-6 px-2">
       <h2 className="text-lg font-semibold text-zinc-100">Setup</h2>
@@ -252,10 +341,10 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         </div>
       )}
 
-      {currentStep === "install-homebrew" && (
+      {currentStep === "install-homebrew" && isMacOS && (
         <StepCard
           title="Install Homebrew"
-          description="Homebrew is required to install the CandleKeep CLI. We'll install it for you."
+          description="Homebrew is required to install the CandleKeep CLI on macOS."
           actionLabel="Install Homebrew"
           onAction={handleInstallHomebrew}
           disabled={stepState.status === "running"}
@@ -265,7 +354,11 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
       {currentStep === "install-cli" && (
         <StepCard
           title="Install CandleKeep CLI"
-          description="The CLI manages your library and handles authentication."
+          description={
+            isMacOS
+              ? "The CLI manages your library and handles authentication. Installing via Homebrew."
+              : "The CLI manages your library and handles authentication. Downloading from GitHub."
+          }
           actionLabel="Install CLI"
           onAction={handleInstallCli}
           disabled={stepState.status === "running"}
@@ -282,23 +375,24 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         />
       )}
 
-      {currentStep === "install-claude" && (
+      {currentStep === "install-host" && selectedHost && (
         <StepCard
-          title="Install Claude Code"
-          description="Claude Code is required for the CandleKeep plugin. Visit claude.ai/download to install it, then come back."
-          actionLabel="I've Installed Claude Code"
+          title={`Install ${HOST_DISPLAY_NAMES[selectedHost]}`}
+          description={`${HOST_DISPLAY_NAMES[selectedHost]} needs to be installed first. Install it, then come back.`}
+          actionLabel={`I've Installed ${HOST_DISPLAY_NAMES[selectedHost]}`}
           onAction={async () => {
-            const installed = await cmd.checkClaudeCodeInstalled();
-            if (installed) {
-              if (!systemCheck?.pluginInstalled) {
-                setCurrentStep("install-plugin");
+            if (!selectedHost) return;
+            const status = await cmd.checkIntegration(selectedHost);
+            if (status.host_installed) {
+              if (!status.integration_installed) {
+                setCurrentStep("install-integration");
               } else {
                 setCurrentStep("done");
               }
             } else {
               setStepState({
                 status: "error",
-                message: "Claude Code not detected. Please install it first.",
+                message: `${HOST_DISPLAY_NAMES[selectedHost]} not detected. Please install it first.`,
               });
             }
           }}
@@ -306,12 +400,12 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         />
       )}
 
-      {currentStep === "install-plugin" && (
+      {currentStep === "install-integration" && selectedHost && (
         <StepCard
-          title="Install CandleKeep Plugin"
-          description="This installs the CandleKeep plugin for Claude Code so you can access your library."
-          actionLabel="Install Plugin"
-          onAction={handleInstallPlugin}
+          title={`Install CandleKeep for ${HOST_DISPLAY_NAMES[selectedHost]}`}
+          description={`This connects your CandleKeep library to ${HOST_DISPLAY_NAMES[selectedHost]}.`}
+          actionLabel="Install Integration"
+          onAction={handleInstallIntegration}
           disabled={stepState.status === "running"}
         />
       )}

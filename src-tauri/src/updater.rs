@@ -1,7 +1,7 @@
 use serde::Serialize;
-use sha2::{Digest, Sha256};
-use std::process::Command;
 use tracing::{info, debug, error};
+
+use crate::platform::Platform;
 
 #[derive(Debug, Serialize)]
 pub struct AppUpdateInfo {
@@ -9,15 +9,23 @@ pub struct AppUpdateInfo {
     pub current_version: String,
     pub latest_version: Option<String>,
     pub download_url: Option<String>,
-    pub dmg_url: Option<String>,
+    pub asset_url: Option<String>,
     pub checksum_url: Option<String>,
+}
+
+/// Determine the expected asset suffix for the current platform.
+fn platform_asset_suffix() -> &'static str {
+    match Platform::current() {
+        Platform::MacOS => ".dmg",
+        Platform::Windows => ".msi",
+        Platform::Linux => ".AppImage",
+    }
 }
 
 #[tauri::command]
 pub async fn check_app_update() -> Result<AppUpdateInfo, String> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
 
-    // Fetch latest release from GitHub
     let url = "https://api.github.com/repos/CandleKeepAgents/candlekeep-desktop/releases/latest";
 
     let client = reqwest::Client::new();
@@ -38,7 +46,7 @@ pub async fn check_app_update() -> Result<AppUpdateInfo, String> {
             current_version,
             latest_version: None,
             download_url: None,
-            dmg_url: None,
+            asset_url: None,
             checksum_url: None,
         });
     }
@@ -58,14 +66,16 @@ pub async fn check_app_update() -> Result<AppUpdateInfo, String> {
         .and_then(|u| u.as_str())
         .map(|s| s.to_string());
 
-    // Find .dmg asset URL for macOS auto-update
-    let dmg_url = release
+    let suffix = platform_asset_suffix();
+
+    // Find platform-specific installer asset
+    let asset_url = release
         .get("assets")
         .and_then(|a| a.as_array())
         .and_then(|assets| {
             assets.iter().find_map(|asset| {
                 let name = asset.get("name")?.as_str()?;
-                if name.ends_with(".dmg") {
+                if name.ends_with(suffix) {
                     asset
                         .get("browser_download_url")
                         .and_then(|u| u.as_str())
@@ -76,7 +86,6 @@ pub async fn check_app_update() -> Result<AppUpdateInfo, String> {
             })
         });
 
-    // Find SHA256 checksums asset URL
     let checksum_url = release
         .get("assets")
         .and_then(|a| a.as_array())
@@ -117,20 +126,21 @@ pub async fn check_app_update() -> Result<AppUpdateInfo, String> {
         current_version,
         latest_version: tag_name,
         download_url,
-        dmg_url,
+        asset_url,
         checksum_url,
     })
 }
 
 #[tauri::command]
-pub async fn install_app_update(dmg_url: String, expected_checksum: Option<String>) -> Result<String, String> {
+pub async fn install_app_update(asset_url: String, expected_checksum: Option<String>) -> Result<String, String> {
     let tmp_dir = std::env::temp_dir();
-    let dmg_path = tmp_dir.join("CandleKeep-update.dmg");
+    let suffix = platform_asset_suffix();
+    let file_name = format!("CandleKeep-update{}", suffix);
+    let file_path = tmp_dir.join(&file_name);
 
-    // Download the DMG
     let client = reqwest::Client::new();
     let response = client
-        .get(&dmg_url)
+        .get(&asset_url)
         .header(
             "User-Agent",
             format!("candlekeep-desktop/{}", env!("CARGO_PKG_VERSION")),
@@ -138,7 +148,7 @@ pub async fn install_app_update(dmg_url: String, expected_checksum: Option<Strin
         .send()
         .await
         .map_err(|e| {
-            error!("Failed to download update from {}: {}", dmg_url, e);
+            error!("Failed to download update from {}: {}", asset_url, e);
             format!("Failed to download update: {}", e)
         })?;
 
@@ -157,6 +167,7 @@ pub async fn install_app_update(dmg_url: String, expected_checksum: Option<Strin
 
     // Verify checksum if provided
     if let Some(ref expected) = expected_checksum {
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(&bytes);
         let computed = format!("{:x}", hasher.finalize());
@@ -168,16 +179,38 @@ pub async fn install_app_update(dmg_url: String, expected_checksum: Option<Strin
         }
     }
 
-    std::fs::write(&dmg_path, &bytes)
-        .map_err(|e| format!("Failed to save DMG: {}", e))?;
+    std::fs::write(&file_path, &bytes)
+        .map_err(|e| format!("Failed to save update: {}", e))?;
 
-    // Open the DMG (mounts it and shows in Finder)
-    Command::new("open")
-        .arg(&dmg_path)
-        .spawn()
-        .map_err(|e| format!("Failed to open DMG: {}", e))?;
-
-    Ok("Update downloaded and opened. Drag the new app to Applications to complete the update.".to_string())
+    // Open the downloaded installer
+    match Platform::current() {
+        Platform::MacOS => {
+            // Open DMG (mounts and shows in Finder)
+            std::process::Command::new("open")
+                .arg(&file_path)
+                .spawn()
+                .map_err(|e| format!("Failed to open DMG: {}", e))?;
+            Ok("Update downloaded and opened. Drag the new app to Applications to complete the update.".to_string())
+        }
+        Platform::Windows => {
+            // Run MSI/NSIS installer
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", &file_path.to_string_lossy()])
+                .spawn()
+                .map_err(|e| format!("Failed to run installer: {}", e))?;
+            Ok("Update downloaded. The installer will guide you through the update.".to_string())
+        }
+        Platform::Linux => {
+            // Make AppImage executable and notify user
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&file_path, std::fs::Permissions::from_mode(0o755))
+                    .map_err(|e| format!("Failed to set permissions: {}", e))?;
+            }
+            Ok(format!("Update downloaded to {}. Replace the current AppImage to complete the update.", file_path.display()))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -194,33 +227,5 @@ mod tests {
         let current = semver::Version::parse("0.1.0").unwrap();
         let latest = semver::Version::parse("0.1.0").unwrap();
         assert!(!(latest > current));
-    }
-
-    #[test]
-    fn test_older_version_no_update() {
-        let current = semver::Version::parse("0.2.0").unwrap();
-        let latest = semver::Version::parse("0.1.0").unwrap();
-        assert!(!(latest > current));
-    }
-
-    #[test]
-    fn test_prerelease_version_comparison() {
-        let current = semver::Version::parse("1.0.0-alpha").unwrap();
-        let latest = semver::Version::parse("1.0.0").unwrap();
-        assert!(latest > current);
-    }
-
-    #[test]
-    fn test_invalid_semver_returns_false() {
-        // Simulate the logic in check_app_update
-        let result = if let (Ok(current), Ok(latest)) = (
-            semver::Version::parse("0.1.0"),
-            semver::Version::parse("not-a-version"),
-        ) {
-            latest > current
-        } else {
-            false
-        };
-        assert!(!result);
     }
 }

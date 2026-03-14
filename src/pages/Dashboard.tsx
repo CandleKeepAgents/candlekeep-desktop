@@ -5,15 +5,37 @@ import { QuickActions } from "../components/QuickActions";
 import { StatusCard } from "../components/StatusCard";
 import { UpdateBanner } from "../components/UpdateBanner";
 import { useCliStatus } from "../hooks/useCliStatus";
+import { useIntegrations } from "../hooks/useIntegrations";
 import { useMetrics } from "../hooks/useMetrics";
-import { usePluginStatus } from "../hooks/usePluginStatus";
-import { checkAppUpdate, checkAuthStatus, installAppUpdate, triggerAuthLogin, updateCli } from "../lib/tauri-commands";
+import {
+  checkAppUpdate,
+  checkAuthStatus,
+  installAppUpdate,
+  triggerAuthLogin,
+  updateCli,
+} from "../lib/tauri-commands";
 import type { AppUpdateInfo } from "../lib/types";
+import { HOST_DISPLAY_NAMES } from "../lib/types";
 
 export function Dashboard() {
-  const { cliStatus, authStatus, latestVersion, updateAvailable, loading: cliLoading, refresh: refreshCli } = useCliStatus();
-  const { pluginStatus, claudeCodeInstalled, loading: pluginLoading } = usePluginStatus();
-  const { metrics, loading: metricsLoading, refresh: refreshMetrics } = useMetrics();
+  const {
+    cliStatus,
+    authStatus,
+    latestVersion,
+    updateAvailable,
+    loading: cliLoading,
+    refresh: refreshCli,
+  } = useCliStatus();
+  const {
+    integrations,
+    loading: integrationsLoading,
+    refresh: refreshIntegrations,
+  } = useIntegrations();
+  const {
+    metrics,
+    loading: metricsLoading,
+    refresh: refreshMetrics,
+  } = useMetrics();
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [appUpdate, setAppUpdate] = useState<AppUpdateInfo | null>(null);
   const [updatingApp, setUpdatingApp] = useState(false);
@@ -53,7 +75,6 @@ export function Dashboard() {
     }
   }, []);
 
-  // Cleanup auth polling on unmount
   useEffect(() => {
     return () => clearAuthPolling();
   }, [clearAuthPolling]);
@@ -64,7 +85,6 @@ export function Dashboard() {
     clearAuthPolling();
     try {
       await triggerAuthLogin();
-      // Poll for auth completion
       authPollRef.current = setInterval(async () => {
         try {
           const auth = await checkAuthStatus();
@@ -75,10 +95,9 @@ export function Dashboard() {
             refreshMetrics();
           }
         } catch {
-          // Ignore poll errors, will retry
+          // Ignore poll errors
         }
       }, 2000);
-      // Stop polling after 5 minutes
       authTimeoutRef.current = setTimeout(() => {
         clearAuthPolling();
         setAuthenticating(false);
@@ -92,7 +111,12 @@ export function Dashboard() {
   const handleCheckUpdates = async () => {
     setCheckingUpdates(true);
     try {
-      await Promise.all([refreshCli(), refreshMetrics(), refreshAppUpdate()]);
+      await Promise.all([
+        refreshCli(),
+        refreshMetrics(),
+        refreshAppUpdate(),
+        refreshIntegrations(),
+      ]);
     } finally {
       setCheckingUpdates(false);
     }
@@ -108,8 +132,7 @@ export function Dashboard() {
   };
 
   const handleUpdateApp = async () => {
-    if (!appUpdate?.dmg_url) {
-      // Fallback: open release page in browser
+    if (!appUpdate?.asset_url) {
       if (appUpdate?.download_url) {
         await openUrl(appUpdate.download_url);
       }
@@ -117,10 +140,9 @@ export function Dashboard() {
     }
     setUpdatingApp(true);
     try {
-      await installAppUpdate(appUpdate.dmg_url);
+      await installAppUpdate(appUpdate.asset_url);
     } catch (err) {
       console.error("Failed to install app update:", err);
-      // Fallback to release page
       if (appUpdate?.download_url) {
         await openUrl(appUpdate.download_url);
       }
@@ -155,25 +177,69 @@ export function Dashboard() {
       <div className="space-y-2">
         <StatusCard
           title="CandleKeep CLI"
-          status={cliLoading ? "loading" : cliStatus?.installed ? "ok" : "error"}
-          detail={cliStatus?.installed ? `v${cliStatus.version} (${cliStatus.install_method})` : "Not installed"}
+          status={
+            cliLoading
+              ? "loading"
+              : cliStatus?.installed
+                ? "ok"
+                : "error"
+          }
+          detail={
+            cliStatus?.installed
+              ? `v${cliStatus.version} (${cliStatus.install_method})`
+              : "Not installed"
+          }
         />
         <StatusCard
           title="Authentication"
-          status={cliLoading ? "loading" : authenticating ? "loading" : authStatus?.authenticated ? "ok" : "error"}
-          detail={authenticating ? "Waiting for authentication..." : authStatus?.authenticated ? "Signed in" : "Not authenticated"}
-          action={!authStatus?.authenticated && !authenticating ? { label: "Sign In", onClick: handleReAuth } : undefined}
+          status={
+            cliLoading
+              ? "loading"
+              : authenticating
+                ? "loading"
+                : authStatus?.authenticated
+                  ? "ok"
+                  : "error"
+          }
+          detail={
+            authenticating
+              ? "Waiting for authentication..."
+              : authStatus?.authenticated
+                ? "Signed in"
+                : "Not authenticated"
+          }
+          action={
+            !authStatus?.authenticated && !authenticating
+              ? { label: "Sign In", onClick: handleReAuth }
+              : undefined
+          }
         />
-        <StatusCard
-          title="Claude Code"
-          status={pluginLoading ? "loading" : claudeCodeInstalled ? "ok" : "warning"}
-          detail={claudeCodeInstalled ? "Installed" : "Not found"}
-        />
-        <StatusCard
-          title="CandleKeep Plugin"
-          status={pluginLoading ? "loading" : pluginStatus?.installed ? "ok" : "error"}
-          detail={pluginStatus?.installed ? `v${pluginStatus.version}` : "Not installed"}
-        />
+
+        {/* Integration status cards */}
+        {integrations.map((integration) => (
+          <StatusCard
+            key={integration.host}
+            title={HOST_DISPLAY_NAMES[integration.host]}
+            status={
+              integrationsLoading
+                ? "loading"
+                : integration.integration_installed
+                  ? "ok"
+                  : integration.host_installed
+                    ? "warning"
+                    : "warning"
+            }
+            detail={
+              integration.integration_installed
+                ? integration.version
+                  ? `v${integration.version}`
+                  : "Installed"
+                : integration.host_installed
+                  ? "Not configured"
+                  : "Not found"
+            }
+          />
+        ))}
       </div>
 
       <MetricsCard

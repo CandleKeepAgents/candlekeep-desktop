@@ -3,6 +3,10 @@ use std::path::PathBuf;
 use std::process::Command;
 use tracing::{info, warn, error};
 
+use crate::platform::{Platform, PlatformInfo};
+use crate::platform::installer;
+use crate::platform::paths;
+
 use super::system::get_full_path;
 
 #[derive(Debug, Serialize)]
@@ -20,39 +24,8 @@ pub struct AuthStatus {
 }
 
 fn find_cli_path() -> Option<PathBuf> {
-    let home = dirs::home_dir();
-
-    // Check common locations (including cargo bin)
-    let mut paths: Vec<PathBuf> = vec![
-        PathBuf::from("/opt/homebrew/bin/ck"),
-        PathBuf::from("/usr/local/bin/ck"),
-    ];
-    if let Some(ref h) = home {
-        paths.push(h.join(".cargo/bin/ck"));
-    }
-
-    for p in &paths {
-        if p.exists() {
-            return Some(p.clone());
-        }
-    }
-
-    // Fall back to which with expanded PATH (macOS GUI apps don't inherit shell PATH)
-    if let Ok(output) = Command::new("which")
-        .arg("ck")
-        .env("PATH", get_full_path())
-        .output()
-    {
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path_str.is_empty() {
-                return Some(PathBuf::from(path_str));
-            }
-        }
-    }
-
-    warn!("CK CLI binary not found in any known path");
-    None
+    let info = PlatformInfo::detect();
+    paths::find_binary("ck", &info)
 }
 
 fn detect_install_method(path: &PathBuf) -> String {
@@ -61,6 +34,8 @@ fn detect_install_method(path: &PathBuf) -> String {
         "homebrew".to_string()
     } else if path_str.contains(".cargo/bin") {
         "cargo".to_string()
+    } else if path_str.contains("programs\\candlekeep") || path_str.contains("programs/candlekeep") {
+        "github-release".to_string()
     } else {
         "manual".to_string()
     }
@@ -96,13 +71,11 @@ fn get_version_from_binary(path: &PathBuf) -> Option<String> {
 
     if output.status.success() {
         let version_str = String::from_utf8_lossy(&output.stdout);
-        // Parse "ck X.Y.Z" or "candlekeep-cli X.Y.Z"
-        let version = version_str
+        version_str
             .trim()
             .split_whitespace()
             .last()
-            .map(|s| s.to_string());
-        version
+            .map(|s| s.to_string())
     } else {
         None
     }
@@ -118,30 +91,50 @@ pub async fn get_cli_version() -> Result<Option<String>, String> {
 
 #[tauri::command]
 pub async fn get_latest_cli_version() -> Result<Option<String>, String> {
+    // Try Homebrew formula first (works for macOS)
     let url = "https://raw.githubusercontent.com/CandleKeepAgents/homebrew-candlekeep/main/Formula/candlekeep-cli.rb";
 
     let response = reqwest::get(url)
         .await
         .map_err(|e| format!("Failed to fetch formula: {}", e))?;
 
-    if !response.status().is_success() {
-        return Ok(None);
+    if response.status().is_success() {
+        let body = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read response: {}", e))?;
+
+        for line in body.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("version \"") {
+                let version = trimmed
+                    .strip_prefix("version \"")
+                    .and_then(|s| s.strip_suffix('"'))
+                    .map(|s| s.to_string());
+                return Ok(version);
+            }
+        }
     }
 
-    let body = response
-        .text()
+    // Fallback: check GitHub releases for latest cli-v* tag
+    let client = reqwest::Client::new();
+    let releases_url = "https://api.github.com/repos/CandleKeepAgents/candlekeep-cloud/releases";
+    if let Ok(response) = client
+        .get(releases_url)
+        .header("User-Agent", "candlekeep-desktop")
+        .send()
         .await
-        .map_err(|e| format!("Failed to read response: {}", e))?;
-
-    // Parse version "X.Y.Z" from formula
-    for line in body.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("version \"") {
-            let version = trimmed
-                .strip_prefix("version \"")
-                .and_then(|s| s.strip_suffix('"'))
-                .map(|s| s.to_string());
-            return Ok(version);
+    {
+        if response.status().is_success() {
+            if let Ok(releases) = response.json::<Vec<serde_json::Value>>().await {
+                for release in &releases {
+                    if let Some(tag) = release.get("tag_name").and_then(|t| t.as_str()) {
+                        if let Some(version) = tag.strip_prefix("cli-v") {
+                            return Ok(Some(version.to_string()));
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -150,45 +143,80 @@ pub async fn get_latest_cli_version() -> Result<Option<String>, String> {
 
 #[tauri::command]
 pub async fn install_cli() -> Result<String, String> {
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg("brew install CandleKeepAgents/candlekeep/candlekeep-cli")
-        .env("PATH", get_full_path())
-        .output()
-        .map_err(|e| {
-            error!("Failed to start CLI installation: {}", e);
-            format!("Failed to start CLI installation: {}", e)
-        })?;
+    let platform_info = PlatformInfo::detect();
 
-    if output.status.success() {
-        info!("CLI installed successfully");
-        Ok("CLI installed successfully".to_string())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        error!("CLI installation failed: {}", stderr);
-        Err(format!("CLI installation failed: {}", stderr))
+    match platform_info.platform {
+        Platform::MacOS => {
+            // Use Homebrew on macOS
+            let output = Command::new("sh")
+                .arg("-c")
+                .arg("brew install CandleKeepAgents/candlekeep/candlekeep-cli")
+                .env("PATH", get_full_path())
+                .output()
+                .map_err(|e| {
+                    error!("Failed to start CLI installation: {}", e);
+                    format!("Failed to start CLI installation: {}", e)
+                })?;
+
+            if output.status.success() {
+                info!("CLI installed successfully via Homebrew");
+                Ok("CLI installed successfully".to_string())
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!("CLI installation failed: {}", stderr);
+                Err(format!("CLI installation failed: {}", stderr))
+            }
+        }
+        Platform::Linux | Platform::Windows => {
+            // Download from GitHub Releases
+            let result = installer::install_cli_from_github(&platform_info).await;
+            if result.ok {
+                info!("CLI installed from GitHub Releases");
+                Ok(result.message)
+            } else {
+                error!("CLI install failed: {}", result.message);
+                Err(result.message)
+            }
+        }
     }
 }
 
 #[tauri::command]
 pub async fn update_cli() -> Result<String, String> {
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg("brew upgrade candlekeep-cli")
-        .env("PATH", get_full_path())
-        .output()
-        .map_err(|e| {
-            error!("Failed to start CLI update: {}", e);
-            format!("Failed to start CLI update: {}", e)
-        })?;
+    let platform_info = PlatformInfo::detect();
 
-    if output.status.success() {
-        info!("CLI updated successfully");
-        Ok("CLI updated successfully".to_string())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        error!("CLI update failed: {}", stderr);
-        Err(format!("CLI update failed: {}", stderr))
+    match platform_info.platform {
+        Platform::MacOS => {
+            let output = Command::new("sh")
+                .arg("-c")
+                .arg("brew upgrade candlekeep-cli")
+                .env("PATH", get_full_path())
+                .output()
+                .map_err(|e| {
+                    error!("Failed to start CLI update: {}", e);
+                    format!("Failed to start CLI update: {}", e)
+                })?;
+
+            if output.status.success() {
+                info!("CLI updated successfully");
+                Ok("CLI updated successfully".to_string())
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!("CLI update failed: {}", stderr);
+                Err(format!("CLI update failed: {}", stderr))
+            }
+        }
+        Platform::Linux | Platform::Windows => {
+            // Re-download from GitHub Releases (overwrites existing)
+            let result = installer::install_cli_from_github(&platform_info).await;
+            if result.ok {
+                info!("CLI updated from GitHub Releases");
+                Ok(result.message)
+            } else {
+                error!("CLI update failed: {}", result.message);
+                Err(result.message)
+            }
+        }
     }
 }
 
@@ -227,34 +255,26 @@ pub async fn check_auth_status() -> Result<AuthStatus, String> {
 
 #[tauri::command]
 pub async fn trigger_auth_login() -> Result<String, String> {
-    // Native auth flow: bind a TCP listener, open browser, wait for callback.
-    // This avoids spawning `ck auth login` which panics (exit 101) when run
-    // from a macOS GUI app due to stdin/stdout handling issues.
-
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("Failed to start local auth server: {}", e))?;
     let port = listener.local_addr()
         .map_err(|e| format!("Failed to get listener port: {}", e))?
         .port();
 
-    // Read API base URL from config (same logic as CLI)
     let api_url = get_api_base_url();
     let auth_url = format!("{}/cli-auth?port={}", api_url, port);
 
     info!("Opening browser for auth: {}", auth_url);
 
-    // Open browser from the Tauri process (works reliably in GUI context)
     if let Err(e) = open::that(&auth_url) {
         warn!("Failed to open browser: {}", e);
         return Err(format!("Failed to open browser: {}. Visit {} manually.", e, auth_url));
     }
 
-    // Wait for the OAuth callback in a background task
     tokio::spawn(async move {
         listener.set_nonblocking(false).ok();
         let handle = std::thread::spawn(move || -> Result<String, String> {
             use std::io::{BufRead, BufReader, Write};
-            // Block until the browser sends the callback (or the listener is dropped)
             let (mut stream, _) = listener.accept()
                 .map_err(|e| format!("Failed to accept callback: {}", e))?;
 
@@ -263,7 +283,6 @@ pub async fn trigger_auth_login() -> Result<String, String> {
             reader.read_line(&mut request_line)
                 .map_err(|e| format!("Failed to read callback: {}", e))?;
 
-            // Parse: GET /callback?key=ck_xxx HTTP/1.1
             let api_key = request_line
                 .split_whitespace()
                 .nth(1)
@@ -271,7 +290,6 @@ pub async fn trigger_auth_login() -> Result<String, String> {
                 .map(|s| s.to_string())
                 .ok_or_else(|| "Invalid callback URL".to_string())?;
 
-            // Send success response to browser
             let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n\
                 <!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>CandleKeep</title>\
                 <style>body{font-family:-apple-system,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#1a1a1a;color:#fff}\
@@ -304,7 +322,6 @@ pub async fn trigger_auth_login() -> Result<String, String> {
     Ok("Auth login started — check your browser".to_string())
 }
 
-/// Read the CandleKeep API base URL from config or use default.
 fn get_api_base_url() -> String {
     if let Ok(url) = std::env::var("CANDLEKEEP_API_URL") {
         return url;
@@ -323,19 +340,16 @@ fn get_api_base_url() -> String {
     "https://www.getcandlekeep.com".to_string()
 }
 
-/// Save API key to ~/.candlekeep/config.toml (same format as CLI).
 fn save_api_key_to_config(api_key: &str) -> Result<(), String> {
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     let config_dir = home.join(".candlekeep");
     let config_path = config_dir.join("config.toml");
 
-    // Ensure directory exists
     if !config_dir.exists() {
         std::fs::create_dir_all(&config_dir)
             .map_err(|e| format!("Failed to create config dir: {}", e))?;
     }
 
-    // Load existing config or create default
     let mut config: toml::Value = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read config: {}", e))?;
@@ -344,7 +358,6 @@ fn save_api_key_to_config(api_key: &str) -> Result<(), String> {
         toml::Value::Table(toml::map::Map::new())
     };
 
-    // Set auth.api_key
     let table = config.as_table_mut().ok_or("Config is not a table")?;
     let auth = table.entry("auth").or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
     if let Some(auth_table) = auth.as_table_mut() {
@@ -361,8 +374,6 @@ fn save_api_key_to_config(api_key: &str) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn auth_logout() -> Result<String, String> {
-    // Clear API key directly from config file (same format as CLI).
-    // This avoids spawning a CLI subprocess which can have PATH issues in GUI apps.
     let home = dirs::home_dir().ok_or("Could not find home directory")?;
     let config_path = home.join(".candlekeep/config.toml");
 
@@ -376,7 +387,6 @@ pub async fn auth_logout() -> Result<String, String> {
     let mut config: toml::Value = content.parse()
         .map_err(|e| format!("Failed to parse config: {}", e))?;
 
-    // Remove auth.api_key
     if let Some(table) = config.as_table_mut() {
         if let Some(auth) = table.get_mut("auth").and_then(|a| a.as_table_mut()) {
             auth.remove("api_key");
