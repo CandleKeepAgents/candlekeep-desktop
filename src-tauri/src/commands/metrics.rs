@@ -41,9 +41,12 @@ fn get_api_config() -> Result<(String, String), String> {
             .get("api")
             .and_then(|api| api.get("url"))
             .and_then(|url| url.as_str())
-            .unwrap_or("https://www.getcandlekeep.com")
+            .unwrap_or("https://getcandlekeep.com")
             .to_string()
     });
+
+    // Normalize: strip www to avoid cross-origin redirect stripping Authorization header
+    let api_url = api_url.replace("://www.getcandlekeep.com", "://getcandlekeep.com");
 
     Ok((api_url, api_key))
 }

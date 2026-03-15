@@ -324,7 +324,7 @@ pub async fn trigger_auth_login() -> Result<String, String> {
 
 fn get_api_base_url() -> String {
     if let Ok(url) = std::env::var("CANDLEKEEP_API_URL") {
-        return url;
+        return normalize_api_url(url);
     }
     let config_path = dirs::home_dir()
         .map(|h| h.join(".candlekeep/config.toml"));
@@ -332,12 +332,17 @@ fn get_api_base_url() -> String {
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(config) = content.parse::<toml::Value>() {
                 if let Some(url) = config.get("api").and_then(|a| a.get("url")).and_then(|u| u.as_str()) {
-                    return url.to_string();
+                    return normalize_api_url(url.to_string());
                 }
             }
         }
     }
-    "https://www.getcandlekeep.com".to_string()
+    "https://getcandlekeep.com".to_string()
+}
+
+/// Normalize API URL: strip www prefix to avoid cross-origin redirect stripping Authorization header
+fn normalize_api_url(url: String) -> String {
+    url.replace("://www.getcandlekeep.com", "://getcandlekeep.com")
 }
 
 fn save_api_key_to_config(api_key: &str) -> Result<(), String> {
