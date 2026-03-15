@@ -1,7 +1,7 @@
 [package]
 name = "candlekeep-desktop"
 version = "1.0.0"
-description = "CandleKeep macOS menu bar app"
+description = "CandleKeep desktop app for managing CLI, plugins, and integrations"
 authors = ["CandleKeep <support@getcandlekeep.com>"]
 edition = "2021"
 
@@ -27,4 +27,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tracing-appender = "0.2"
 sha2 = "0.10"
+image = { version = "0.25", default-features = false, features = ["png"] }
 open = "5"
+zip = "2"
+flate2 = "1"
+tar = "0.4"

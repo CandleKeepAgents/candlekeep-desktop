@@ -1,4 +1,4 @@
-import { ArrowUpCircle, CheckCircle, Clock, Download } from "lucide-react";
+import { ArrowUpCircle, CheckCircle, Clock, Download, Loader2, Trash2 } from "lucide-react";
 
 interface IntegrationCardProps {
   name: string;
@@ -6,7 +6,9 @@ interface IntegrationCardProps {
   installed: boolean;
   version?: string | null;
   status: "installed" | "available" | "update-available" | "coming-soon";
+  loading?: boolean;
   onInstall?: () => void;
+  onUninstall?: () => void;
   onUpdate?: () => void;
 }
 
@@ -15,7 +17,9 @@ export function IntegrationCard({
   description,
   version,
   status,
+  loading,
   onInstall,
+  onUninstall,
   onUpdate,
 }: IntegrationCardProps) {
   const statusBadge = {
@@ -57,18 +61,54 @@ export function IntegrationCard({
         <button
           type="button"
           onClick={onInstall}
-          className="w-full text-xs px-3 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 text-white transition-colors"
+          disabled={loading}
+          className="w-full text-xs px-3 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 text-white transition-colors flex items-center justify-center gap-1.5 disabled:bg-zinc-700 disabled:text-zinc-500"
         >
-          Install
+          {loading ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Installing...
+            </>
+          ) : (
+            "Install"
+          )}
         </button>
       )}
       {status === "update-available" && onUpdate && (
         <button
           type="button"
           onClick={onUpdate}
-          className="w-full text-xs px-3 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 text-white transition-colors"
+          disabled={loading}
+          className="w-full text-xs px-3 py-1.5 rounded-md bg-amber-600 hover:bg-amber-500 text-white transition-colors flex items-center justify-center gap-1.5 disabled:bg-zinc-700 disabled:text-zinc-500"
         >
-          Update
+          {loading ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Updating...
+            </>
+          ) : (
+            "Update"
+          )}
+        </button>
+      )}
+      {(status === "installed" || status === "update-available") && onUninstall && (
+        <button
+          type="button"
+          onClick={onUninstall}
+          disabled={loading}
+          className="w-full text-xs px-3 py-1.5 mt-1.5 rounded-md bg-zinc-700 hover:bg-red-600/80 text-zinc-300 hover:text-white transition-colors flex items-center justify-center gap-1.5 disabled:bg-zinc-700 disabled:text-zinc-500"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Removing...
+            </>
+          ) : (
+            <>
+              <Trash2 className="w-3.5 h-3.5" />
+              Uninstall
+            </>
+          )}
         </button>
       )}
     </div>

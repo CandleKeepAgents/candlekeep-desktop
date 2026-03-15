@@ -1,33 +1,62 @@
+import { useState } from "react";
 import { IntegrationCard } from "../components/IntegrationCard";
-import { usePluginStatus } from "../hooks/usePluginStatus";
-import { installPlugin, updatePlugin } from "../lib/tauri-commands";
+import { useIntegrations } from "../hooks/useIntegrations";
+import {
+  installIntegration,
+  repairIntegration,
+  uninstallIntegration,
+  updateIntegration,
+} from "../lib/tauri-commands";
+import type { HostKind } from "../lib/types";
+import { HOST_DESCRIPTIONS, HOST_DISPLAY_NAMES } from "../lib/types";
 
 export function Integrations() {
-  const { pluginStatus, claudeCodeInstalled, refresh } = usePluginStatus();
-
-  const handleInstallPlugin = async () => {
+  const { integrations, loading, refresh } = useIntegrations();
+  const [actionLoading, setActionLoading] = useState<HostKind | null>(null);
+  const handleAction = async (
+    host: HostKind,
+    action: "install" | "uninstall" | "update" | "repair",
+  ) => {
+    setActionLoading(host);
     try {
-      await installPlugin();
+      const fn =
+        action === "install"
+          ? installIntegration
+          : action === "uninstall"
+            ? uninstallIntegration
+            : action === "update"
+              ? updateIntegration
+              : repairIntegration;
+      const result = await fn(host);
+      if (!result.ok) {
+        console.error(`${action} failed:`, result.message);
+      }
       refresh();
     } catch (err) {
-      console.error("Failed to install plugin:", err);
+      console.error(`Failed to ${action} integration:`, err);
+    } finally {
+      setActionLoading(null);
     }
   };
 
-  const handleUpdatePlugin = async () => {
-    try {
-      await updatePlugin();
-      refresh();
-    } catch (err) {
-      console.error("Failed to update plugin:", err);
+  const getCardStatus = (
+    integration: (typeof integrations)[0],
+  ): "installed" | "available" | "update-available" | "coming-soon" => {
+    if (integration.integration_installed) {
+      if (
+        integration.latest_version &&
+        integration.version &&
+        integration.latest_version !== integration.version
+      ) {
+        return "update-available";
+      }
+      return "installed";
     }
+    if (integration.host_installed) {
+      return "available";
+    }
+    return "available";
   };
-
-  const claudeCodeStatus = pluginStatus?.installed
-    ? "installed"
-    : claudeCodeInstalled
-    ? "available"
-    : "available";
 
   return (
     <div className="space-y-4">
@@ -36,31 +65,28 @@ export function Integrations() {
         Manage CandleKeep integrations with your AI coding tools.
       </p>
 
-      <div className="space-y-3">
-        <IntegrationCard
-          name="Claude Code"
-          description="Access your CandleKeep library directly from Claude Code with AI-powered search and document management."
-          installed={pluginStatus?.installed ?? false}
-          version={pluginStatus?.version}
-          status={claudeCodeStatus as "installed" | "available" | "update-available" | "coming-soon"}
-          onInstall={handleInstallPlugin}
-          onUpdate={handleUpdatePlugin}
-        />
-
-        <IntegrationCard
-          name="Cursor"
-          description="Use your CandleKeep library as context in Cursor IDE for smarter code assistance."
-          installed={false}
-          status="coming-soon"
-        />
-
-        <IntegrationCard
-          name="Codex"
-          description="Connect your CandleKeep library to OpenAI Codex for enhanced coding workflows."
-          installed={false}
-          status="coming-soon"
-        />
-      </div>
+      {loading ? (
+        <div className="text-center text-sm text-zinc-400 py-8">
+          Loading integrations...
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {integrations.map((integration) => (
+            <IntegrationCard
+              key={integration.host}
+              name={HOST_DISPLAY_NAMES[integration.host]}
+              description={HOST_DESCRIPTIONS[integration.host]}
+              installed={integration.integration_installed}
+              version={integration.version}
+              status={getCardStatus(integration)}
+              loading={actionLoading === integration.host}
+              onInstall={() => handleAction(integration.host, "install")}
+              onUninstall={() => handleAction(integration.host, "uninstall")}
+              onUpdate={() => handleAction(integration.host, "update")}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -71,7 +71,7 @@ Struct fields use `snake_case` in Rust and are received as `snake_case` in TypeS
 - **Close = hide**: X button calls `getCurrentWindow().hide()`, tray click toggles visibility
 
 ### CandleKeep API
-- Base URL: `https://www.getcandlekeep.com/api/v1`
+- Base URL: `https://getcandlekeep.com/api/v1`
 - Auth: `Authorization: Bearer {api_key}` from `~/.candlekeep/config.toml`
 - Key endpoint: `GET /auth/whoami` → `{ id, email, name, tier, item_limit, item_count }`
 

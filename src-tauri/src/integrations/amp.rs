@@ -7,32 +7,29 @@ use crate::platform::PlatformInfo;
 
 use super::{HostIntegration, HostKind, IntegrationStatus, Requirement, RequirementStatus};
 
-pub struct CursorAdapter;
+pub struct AmpAdapter;
 
-impl CursorAdapter {
+impl AmpAdapter {
     pub fn new() -> Self {
         Self
     }
 
-    /// Get the Cursor config directory (~/.cursor/) — the standard location
-    /// where Cursor reads global MCP config on all platforms.
+    /// Get the Amp config directory per platform.
     fn config_dir() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".cursor"))
+        let home = dirs::home_dir()?;
+        // Amp uses ~/.amp/ on all platforms
+        Some(home.join(".amp"))
     }
 
-    /// Check if Cursor is installed by looking for its config directory.
-    fn is_cursor_installed() -> bool {
-        Self::config_dir()
-            .map(|d| d.exists())
-            .unwrap_or(false)
+    fn is_amp_installed() -> bool {
+        let info = PlatformInfo::detect();
+        paths::find_binary("amp", &info).is_some()
     }
 
-    /// Path to the MCP config file.
     fn mcp_config_path() -> Option<PathBuf> {
         Self::config_dir().map(|d| d.join("mcp.json"))
     }
 
-    /// Check if CandleKeep MCP server is configured.
     fn is_mcp_configured() -> bool {
         let Some(path) = Self::mcp_config_path() else { return false };
         if !path.exists() { return false; }
@@ -45,18 +42,15 @@ impl CursorAdapter {
             .is_some()
     }
 
-    /// Write the CandleKeep MCP server config into Cursor's mcp.json.
     fn write_mcp_config() -> Result<(), String> {
         let path = Self::mcp_config_path()
-            .ok_or("Could not determine Cursor config path")?;
+            .ok_or("Could not determine Amp config path")?;
 
-        // Ensure parent dir exists
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create config dir: {}", e))?;
         }
 
-        // Load existing or create new
         let mut config: serde_json::Value = if path.exists() {
             let content = std::fs::read_to_string(&path)
                 .map_err(|e| format!("Failed to read MCP config: {}", e))?;
@@ -66,12 +60,10 @@ impl CursorAdapter {
             serde_json::json!({})
         };
 
-        // Find the ck binary
         let info = PlatformInfo::detect();
         let ck_path = paths::find_binary("ck", &info)
             .ok_or("CandleKeep CLI (ck) not found. Install it first.")?;
 
-        // Add candlekeep MCP server entry
         let servers = config
             .as_object_mut()
             .ok_or("Config is not an object")?
@@ -79,15 +71,11 @@ impl CursorAdapter {
             .or_insert_with(|| serde_json::json!({}));
 
         if let Some(servers_obj) = servers.as_object_mut() {
-            let home = dirs::home_dir()
-                .map(|h| h.to_string_lossy().to_string())
-                .unwrap_or_default();
             servers_obj.insert(
                 "candlekeep".to_string(),
                 serde_json::json!({
                     "command": ck_path.to_string_lossy(),
-                    "args": ["mcp", "serve"],
-                    "env": { "HOME": home }
+                    "args": ["mcp", "serve"]
                 }),
             );
         }
@@ -101,17 +89,17 @@ impl CursorAdapter {
     }
 }
 
-impl HostIntegration for CursorAdapter {
+impl HostIntegration for AmpAdapter {
     fn kind(&self) -> HostKind {
-        HostKind::Cursor
+        HostKind::Amp
     }
 
     fn detect_host(&self, _platform: &PlatformInfo) -> bool {
-        Self::is_cursor_installed()
+        Self::is_amp_installed()
     }
 
     fn detect_integration(&self) -> IntegrationStatus {
-        let host_installed = Self::is_cursor_installed();
+        let host_installed = Self::is_amp_installed();
         let integration_installed = Self::is_mcp_configured();
 
         let status = if !host_installed {
@@ -123,7 +111,7 @@ impl HostIntegration for CursorAdapter {
         };
 
         IntegrationStatus {
-            host: HostKind::Cursor,
+            host: HostKind::Amp,
             host_installed,
             integration_installed,
             version: None,
@@ -135,7 +123,7 @@ impl HostIntegration for CursorAdapter {
 
     fn uninstall(&self) -> ActionResult {
         let Some(path) = Self::mcp_config_path() else {
-            return ActionResult::failure("Could not determine Cursor config path");
+            return ActionResult::failure("Could not determine Amp config path");
         };
         if !path.exists() {
             return ActionResult::success("Nothing to uninstall");
@@ -154,8 +142,8 @@ impl HostIntegration for CursorAdapter {
                 if let Err(e) = std::fs::write(&path, output) {
                     return ActionResult::failure(format!("Failed to write config: {}", e));
                 }
-                info!("CandleKeep MCP server removed from Cursor");
-                let mut result = ActionResult::success("CandleKeep removed from Cursor");
+                info!("CandleKeep MCP server removed from Amp");
+                let mut result = ActionResult::success("CandleKeep removed from Amp");
                 result.restart_required = true;
                 result
             }
@@ -164,14 +152,14 @@ impl HostIntegration for CursorAdapter {
     }
 
     fn install(&self) -> ActionResult {
-        if !Self::is_cursor_installed() {
-            return ActionResult::failure("Cursor is not installed. Install Cursor first.");
+        if !Self::is_amp_installed() {
+            return ActionResult::failure("Amp is not installed. Install Amp first.");
         }
 
         match Self::write_mcp_config() {
             Ok(()) => {
-                info!("CandleKeep MCP server configured for Cursor");
-                let mut result = ActionResult::success("CandleKeep configured for Cursor");
+                info!("CandleKeep MCP server configured for Amp");
+                let mut result = ActionResult::success("CandleKeep configured for Amp");
                 result.restart_required = true;
                 result
             }
@@ -180,7 +168,6 @@ impl HostIntegration for CursorAdapter {
     }
 
     fn update(&self) -> ActionResult {
-        // Re-write config with latest ck path
         self.install()
     }
 
@@ -191,9 +178,9 @@ impl HostIntegration for CursorAdapter {
     fn requirements(&self, platform: &PlatformInfo) -> Vec<Requirement> {
         vec![
             Requirement {
-                name: "Cursor".to_string(),
-                description: "Install Cursor from cursor.com".to_string(),
-                status: if Self::is_cursor_installed() {
+                name: "Amp".to_string(),
+                description: "Install Amp CLI".to_string(),
+                status: if Self::is_amp_installed() {
                     RequirementStatus::Satisfied
                 } else {
                     RequirementStatus::Missing
