@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 use tracing::{info, error};
 
 use super::{Platform, PlatformInfo};
@@ -53,7 +54,11 @@ pub async fn install_cli_from_github(platform_info: &PlatformInfo) -> ActionResu
     };
 
     // Fetch latest release from GitHub
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))
+        .unwrap_or_else(|_| reqwest::Client::new());
     let releases_url = "https://api.github.com/repos/CandleKeepAgents/candlekeep-cloud/releases";
     let response = match client
         .get(releases_url)
@@ -168,19 +173,29 @@ fn extract_tar_gz(data: &[u8], dest: &PathBuf, binary_name: &str) -> Result<(), 
     use flate2::read::GzDecoder;
     use tar::Archive;
 
+    let canonical_dest = dest.canonicalize().map_err(|e| {
+        format!("Failed to canonicalize destination: {}", e)
+    })?;
+
     let decoder = GzDecoder::new(data);
     let mut archive = Archive::new(decoder);
 
     for entry in archive.entries().map_err(|e| e.to_string())? {
         let mut entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path().map_err(|e| e.to_string())?;
+
+        // Zip-slip prevention: reject entries with path traversal components
+        if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err(format!("Archive contains path traversal: {}", path.display()));
+        }
+
         let file_name = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("");
 
         if file_name == binary_name || file_name == "ck" {
-            let dest_path = dest.join(binary_name);
+            let dest_path = canonical_dest.join(binary_name);
             entry.unpack(&dest_path).map_err(|e| e.to_string())?;
             return Ok(());
         }
@@ -190,19 +205,30 @@ fn extract_tar_gz(data: &[u8], dest: &PathBuf, binary_name: &str) -> Result<(), 
 }
 
 fn extract_zip(data: &[u8], dest: &PathBuf, binary_name: &str) -> Result<(), String> {
+    let canonical_dest = dest.canonicalize().map_err(|e| {
+        format!("Failed to canonicalize destination: {}", e)
+    })?;
+
     let cursor = std::io::Cursor::new(data);
     let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = file.name().to_string();
-        let file_name = std::path::Path::new(&name)
+        let entry_path = std::path::Path::new(&name);
+
+        // Zip-slip prevention: reject entries with path traversal components
+        if entry_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err(format!("Archive contains path traversal: {}", name));
+        }
+
+        let file_name = entry_path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("");
 
         if file_name == binary_name || file_name == "ck.exe" || file_name == "ck" {
-            let dest_path = dest.join(binary_name);
+            let dest_path = canonical_dest.join(binary_name);
             let mut out = std::fs::File::create(&dest_path).map_err(|e| e.to_string())?;
             std::io::copy(&mut file, &mut out).map_err(|e| e.to_string())?;
             return Ok(());

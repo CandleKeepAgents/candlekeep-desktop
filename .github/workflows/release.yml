@@ -98,6 +98,26 @@ jobs:
           shasum -a 256 *.dmg > SHA256SUMS-macos
           gh release upload ${{ github.ref_name }} SHA256SUMS-macos --clobber
 
+      - name: Generate and upload SHA256 checksums (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd src-tauri/target/release/bundle
+          find . -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' | while read f; do sha256sum "$f"; done > SHA256SUMS-linux
+          gh release upload ${{ github.ref_name }} SHA256SUMS-linux --clobber
+
+      - name: Generate and upload SHA256 checksums (Windows)
+        if: matrix.os == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path src-tauri/target/release/bundle -Recurse -Include *.msi,*.exe
+          $checksums = $files | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash)  $($_.Name)" }
+          $checksums | Out-File -FilePath SHA256SUMS-windows -Encoding utf8
+          gh release upload ${{ github.ref_name }} SHA256SUMS-windows --clobber
+
   check:
     strategy:
       matrix:
@@ -141,6 +161,7 @@ jobs:
         run: pnpm exec tsc --noEmit
 
       - name: Lint
+        # ESLint plugin compatibility issues with Windows paths — re-enable after eslint-plugin-react upgrade
         if: matrix.os != 'windows-latest'
         run: pnpm lint
 

@@ -28,7 +28,7 @@ export function useIntegrations(pollInterval = 30000) {
 
     const schedule = () => {
       const backoff = Math.min(
-        pollInterval * 2 ** failureCount.current,
+        pollInterval * 2 ** Math.max(0, failureCount.current - 1),
         MAX_INTERVAL,
       );
       timeoutId = setTimeout(() => {
