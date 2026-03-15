@@ -26,7 +26,7 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
   const [systemCheck, setSystemCheck] = useState<SystemCheckResult | null>(
     null,
   );
-  const [selectedHost, setSelectedHost] = useState<HostKind | null>(null);
+  const [selectedHosts, setSelectedHosts] = useState<HostKind[]>([]);
   const [platformInfo, setPlatformInfo] = useState<PlatformInfo | null>(null);
   const [stepState, setStepState] = useState<StepState>({
     status: "pending",
@@ -89,18 +89,10 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         setCurrentStep("install-cli");
       } else if (!result.authenticated) {
         setCurrentStep("authenticate");
+      } else if (selectedHosts.length > 0) {
+        setCurrentStep("install-integration");
       } else {
-        // Check if selected host integration needs install
-        const hostStatus = selectedHost
-          ? result.integrations.find((i) => i.host === selectedHost)
-          : null;
-        if (hostStatus && !hostStatus.host_installed) {
-          setCurrentStep("install-host");
-        } else if (hostStatus && !hostStatus.integration_installed) {
-          setCurrentStep("install-integration");
-        } else {
-          setCurrentStep("done");
-        }
+        setCurrentStep("done");
       }
     } catch (err) {
       setStepState({
@@ -108,7 +100,7 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         message: `System check failed: ${err}`,
       });
     }
-  }, [selectedHost]);
+  }, [selectedHosts]);
 
   const handleInstallHomebrew = async () => {
     setStepState({
@@ -166,16 +158,8 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
             authTimeoutRef.current = null;
             setStepState({ status: "success", message: "Authenticated!" });
 
-            // Check host integration status
-            if (selectedHost) {
-              const status = await cmd.checkIntegration(selectedHost);
-              if (!status.host_installed) {
-                setCurrentStep("install-host");
-              } else if (!status.integration_installed) {
-                setCurrentStep("install-integration");
-              } else {
-                setCurrentStep("done");
-              }
+            if (selectedHosts.length > 0) {
+              setCurrentStep("install-integration");
             } else {
               setCurrentStep("done");
             }
@@ -198,23 +182,40 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
     }
   };
 
-  const handleInstallIntegration = async () => {
-    if (!selectedHost) return;
-    setStepState({
-      status: "running",
-      message: `Installing CandleKeep for ${HOST_DISPLAY_NAMES[selectedHost]}...`,
-    });
-    try {
-      const result = await cmd.installIntegration(selectedHost);
-      if (result.ok) {
-        setStepState({ status: "success", message: result.message });
-        setCurrentStep("done");
-      } else {
-        setStepState({ status: "error", message: result.message });
+  const handleInstallIntegrations = async () => {
+    if (selectedHosts.length === 0) return;
+    const total = selectedHosts.length;
+    const results: { host: HostKind; ok: boolean; message: string }[] = [];
+
+    for (let i = 0; i < selectedHosts.length; i++) {
+      const host = selectedHosts[i];
+      setStepState({
+        status: "running",
+        message: `Installing CandleKeep for ${HOST_DISPLAY_NAMES[host]}... (${i + 1}/${total})`,
+      });
+      try {
+        const result = await cmd.installIntegration(host);
+        results.push({ host, ok: result.ok, message: result.message });
+      } catch (err) {
+        results.push({ host, ok: false, message: `${err}` });
       }
-    } catch (err) {
-      setStepState({ status: "error", message: `${err}` });
     }
+
+    const succeeded = results.filter((r) => r.ok);
+    const failed = results.filter((r) => !r.ok);
+
+    if (failed.length === 0) {
+      setStepState({
+        status: "success",
+        message: `Configured ${succeeded.length} integration${succeeded.length > 1 ? "s" : ""}`,
+      });
+    } else {
+      setStepState({
+        status: "error",
+        message: `${succeeded.length} succeeded, ${failed.length} failed: ${failed.map((f) => `${HOST_DISPLAY_NAMES[f.host]}: ${f.message}`).join("; ")}`,
+      });
+    }
+    setCurrentStep("done");
   };
 
   const stepIcon = (status: StepState["status"]) => {
@@ -258,40 +259,67 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
     );
   }
 
-  // --- Host picker screen ---
+  // --- Host picker screen (multi-select) ---
   if (currentStep === "host-picker") {
     const hosts: HostKind[] = ["claude_code", "cursor", "codex", "amp"];
+    const toggleHost = (host: HostKind) => {
+      setSelectedHosts((prev) =>
+        prev.includes(host) ? prev.filter((h) => h !== host) : [...prev, host],
+      );
+    };
     return (
       <div className="space-y-6 px-2">
         <h2 className="text-lg font-semibold text-zinc-100">
-          Choose Your AI Tool
+          Choose Your AI Tools
         </h2>
         <p className="text-xs text-zinc-400">
-          Select the AI coding tool you want to connect with CandleKeep.
+          Select the AI coding tools you want to connect with CandleKeep. You
+          can choose multiple.
         </p>
         <div className="space-y-2">
-          {hosts.map((host) => (
-            <button
-              type="button"
-              key={host}
-              onClick={() => {
-                setSelectedHost(host);
-                setCurrentStep("system-check");
-                // Trigger system check after state update
-                setTimeout(() => runSystemCheck(), 0);
-              }}
-              className={`w-full p-4 rounded-lg border transition-colors text-left ${
-                selectedHost === host
-                  ? "border-amber-500 bg-amber-600/10"
-                  : "border-zinc-700/50 bg-zinc-800/50 hover:border-zinc-600"
-              }`}
-            >
-              <h4 className="text-sm font-medium text-zinc-100">
-                {HOST_DISPLAY_NAMES[host]}
-              </h4>
-            </button>
-          ))}
+          {hosts.map((host) => {
+            const selected = selectedHosts.includes(host);
+            return (
+              <button
+                type="button"
+                key={host}
+                onClick={() => toggleHost(host)}
+                className={`w-full p-4 rounded-lg border transition-colors text-left flex items-center gap-3 ${
+                  selected
+                    ? "border-amber-500 bg-amber-600/10"
+                    : "border-zinc-700/50 bg-zinc-800/50 hover:border-zinc-600"
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 rounded flex-shrink-0 border-2 flex items-center justify-center transition-colors ${
+                    selected
+                      ? "border-amber-500 bg-amber-600"
+                      : "border-zinc-600 bg-transparent"
+                  }`}
+                >
+                  {selected && (
+                    <CheckCircle className="w-3.5 h-3.5 text-white" />
+                  )}
+                </div>
+                <h4 className="text-sm font-medium text-zinc-100">
+                  {HOST_DISPLAY_NAMES[host]}
+                </h4>
+              </button>
+            );
+          })}
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            setCurrentStep("system-check");
+            setTimeout(() => runSystemCheck(), 0);
+          }}
+          disabled={selectedHosts.length === 0}
+          className="w-full flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-medium transition-colors"
+        >
+          Continue
+          <ArrowRight className="w-4 h-4" />
+        </button>
       </div>
     );
   }
@@ -309,8 +337,8 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
           </h1>
           <p className="text-sm text-zinc-400 max-w-xs">
             CandleKeep is ready to use.
-            {selectedHost &&
-              ` Your library is now accessible from ${HOST_DISPLAY_NAMES[selectedHost]}.`}
+            {selectedHosts.length > 0 &&
+              ` Your library is now accessible from ${selectedHosts.map((h) => HOST_DISPLAY_NAMES[h]).join(", ")}.`}
           </p>
         </div>
         <button
@@ -375,37 +403,12 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         />
       )}
 
-      {currentStep === "install-host" && selectedHost && (
+      {currentStep === "install-integration" && selectedHosts.length > 0 && (
         <StepCard
-          title={`Install ${HOST_DISPLAY_NAMES[selectedHost]}`}
-          description={`${HOST_DISPLAY_NAMES[selectedHost]} needs to be installed first. Install it, then come back.`}
-          actionLabel={`I've Installed ${HOST_DISPLAY_NAMES[selectedHost]}`}
-          onAction={async () => {
-            if (!selectedHost) return;
-            const status = await cmd.checkIntegration(selectedHost);
-            if (status.host_installed) {
-              if (!status.integration_installed) {
-                setCurrentStep("install-integration");
-              } else {
-                setCurrentStep("done");
-              }
-            } else {
-              setStepState({
-                status: "error",
-                message: `${HOST_DISPLAY_NAMES[selectedHost]} not detected. Please install it first.`,
-              });
-            }
-          }}
-          disabled={stepState.status === "running"}
-        />
-      )}
-
-      {currentStep === "install-integration" && selectedHost && (
-        <StepCard
-          title={`Install CandleKeep for ${HOST_DISPLAY_NAMES[selectedHost]}`}
-          description={`This connects your CandleKeep library to ${HOST_DISPLAY_NAMES[selectedHost]}.`}
-          actionLabel="Install Integration"
-          onAction={handleInstallIntegration}
+          title="Connect Your AI Tools"
+          description={`This will configure CandleKeep for ${selectedHosts.map((h) => HOST_DISPLAY_NAMES[h]).join(", ")}.`}
+          actionLabel={`Install ${selectedHosts.length > 1 ? `${selectedHosts.length} Integrations` : "Integration"}`}
+          onAction={handleInstallIntegrations}
           disabled={stepState.status === "running"}
         />
       )}
