@@ -171,6 +171,30 @@ impl HostIntegration for ClaudeCodeAdapter {
         }
     }
 
+    fn uninstall(&self) -> ActionResult {
+        let info = PlatformInfo::detect();
+        let path_env = paths::get_full_path(&info);
+
+        let output = match Command::new("sh")
+            .arg("-c")
+            .arg("claude /plugin uninstall candlekeep-cloud@candlekeep")
+            .env("PATH", &path_env)
+            .output()
+        {
+            Ok(o) => o,
+            Err(e) => return ActionResult::failure(format!("Failed to uninstall plugin: {}", e)),
+        };
+
+        if output.status.success() {
+            info!("Plugin uninstalled successfully");
+            ActionResult::success("Plugin uninstalled successfully")
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            error!("Plugin uninstall failed: {}", stderr);
+            ActionResult::failure(format!("Plugin uninstall failed: {}", stderr))
+        }
+    }
+
     fn update(&self) -> ActionResult {
         let info = PlatformInfo::detect();
         let path_env = paths::get_full_path(&info);

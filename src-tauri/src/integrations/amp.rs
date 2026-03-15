@@ -121,6 +121,36 @@ impl HostIntegration for AmpAdapter {
         }
     }
 
+    fn uninstall(&self) -> ActionResult {
+        let Some(path) = Self::mcp_config_path() else {
+            return ActionResult::failure("Could not determine Amp config path");
+        };
+        if !path.exists() {
+            return ActionResult::success("Nothing to uninstall");
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            return ActionResult::failure("Failed to read MCP config");
+        };
+        let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&content) else {
+            return ActionResult::failure("Failed to parse MCP config");
+        };
+        if let Some(servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
+            servers.remove("candlekeep");
+        }
+        match serde_json::to_string_pretty(&config) {
+            Ok(output) => {
+                if let Err(e) = std::fs::write(&path, output) {
+                    return ActionResult::failure(format!("Failed to write config: {}", e));
+                }
+                info!("CandleKeep MCP server removed from Amp");
+                let mut result = ActionResult::success("CandleKeep removed from Amp");
+                result.restart_required = true;
+                result
+            }
+            Err(e) => ActionResult::failure(format!("Failed to serialize config: {}", e)),
+        }
+    }
+
     fn install(&self) -> ActionResult {
         if !Self::is_amp_installed() {
             return ActionResult::failure("Amp is not installed. Install Amp first.");

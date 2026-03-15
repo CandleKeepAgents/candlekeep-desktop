@@ -57,6 +57,7 @@ pub fn run() {
             integrations::list_integrations,
             integrations::check_integration,
             integrations::install_integration,
+            integrations::uninstall_integration,
             integrations::update_integration,
             integrations::repair_integration,
             // Metrics commands

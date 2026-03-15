@@ -40,6 +40,8 @@ export const checkIntegration = (host: HostKind) =>
   invoke<IntegrationStatus>("check_integration", { host });
 export const installIntegration = (host: HostKind) =>
   invoke<ActionResult>("install_integration", { host });
+export const uninstallIntegration = (host: HostKind) =>
+  invoke<ActionResult>("uninstall_integration", { host });
 export const updateIntegration = (host: HostKind) =>
   invoke<ActionResult>("update_integration", { host });
 export const repairIntegration = (host: HostKind) =>

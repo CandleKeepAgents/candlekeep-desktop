@@ -14,18 +14,10 @@ impl CursorAdapter {
         Self
     }
 
-    /// Get the Cursor config directory per platform.
+    /// Get the Cursor config directory (~/.cursor/) — the standard location
+    /// where Cursor reads global MCP config on all platforms.
     fn config_dir() -> Option<PathBuf> {
-        let home = dirs::home_dir()?;
-        #[cfg(target_os = "macos")]
-        { Some(home.join("Library/Application Support/Cursor/User")) }
-        #[cfg(target_os = "linux")]
-        { Some(home.join(".config/Cursor/User")) }
-        #[cfg(target_os = "windows")]
-        {
-            std::env::var("APPDATA").ok()
-                .map(|appdata| PathBuf::from(appdata).join("Cursor/User"))
-        }
+        dirs::home_dir().map(|h| h.join(".cursor"))
     }
 
     /// Check if Cursor is installed by looking for its config directory.
@@ -37,7 +29,7 @@ impl CursorAdapter {
 
     /// Path to the MCP config file.
     fn mcp_config_path() -> Option<PathBuf> {
-        Self::config_dir().map(|d| d.join("globalStorage/mcp.json"))
+        Self::config_dir().map(|d| d.join("mcp.json"))
     }
 
     /// Check if CandleKeep MCP server is configured.
@@ -87,11 +79,15 @@ impl CursorAdapter {
             .or_insert_with(|| serde_json::json!({}));
 
         if let Some(servers_obj) = servers.as_object_mut() {
+            let home = dirs::home_dir()
+                .map(|h| h.to_string_lossy().to_string())
+                .unwrap_or_default();
             servers_obj.insert(
                 "candlekeep".to_string(),
                 serde_json::json!({
                     "command": ck_path.to_string_lossy(),
-                    "args": ["mcp", "serve"]
+                    "args": ["mcp", "serve"],
+                    "env": { "HOME": home }
                 }),
             );
         }
@@ -134,6 +130,36 @@ impl HostIntegration for CursorAdapter {
             latest_version: None,
             install_method: "mcp-config".to_string(),
             status,
+        }
+    }
+
+    fn uninstall(&self) -> ActionResult {
+        let Some(path) = Self::mcp_config_path() else {
+            return ActionResult::failure("Could not determine Cursor config path");
+        };
+        if !path.exists() {
+            return ActionResult::success("Nothing to uninstall");
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            return ActionResult::failure("Failed to read MCP config");
+        };
+        let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&content) else {
+            return ActionResult::failure("Failed to parse MCP config");
+        };
+        if let Some(servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
+            servers.remove("candlekeep");
+        }
+        match serde_json::to_string_pretty(&config) {
+            Ok(output) => {
+                if let Err(e) = std::fs::write(&path, output) {
+                    return ActionResult::failure(format!("Failed to write config: {}", e));
+                }
+                info!("CandleKeep MCP server removed from Cursor");
+                let mut result = ActionResult::success("CandleKeep removed from Cursor");
+                result.restart_required = true;
+                result
+            }
+            Err(e) => ActionResult::failure(format!("Failed to serialize config: {}", e)),
         }
     }
 

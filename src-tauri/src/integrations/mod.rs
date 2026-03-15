@@ -77,6 +77,7 @@ pub trait HostIntegration: Send + Sync {
     fn detect_host(&self, platform: &PlatformInfo) -> bool;
     fn detect_integration(&self) -> IntegrationStatus;
     fn install(&self) -> ActionResult;
+    fn uninstall(&self) -> ActionResult;
     fn update(&self) -> ActionResult;
     fn repair(&self) -> ActionResult;
     fn requirements(&self, platform: &PlatformInfo) -> Vec<Requirement>;
@@ -119,6 +120,12 @@ pub async fn install_integration(host: HostKind) -> Result<ActionResult, String>
 pub async fn update_integration(host: HostKind) -> Result<ActionResult, String> {
     let adapter = get_adapter(host);
     Ok(adapter.update())
+}
+
+#[tauri::command]
+pub async fn uninstall_integration(host: HostKind) -> Result<ActionResult, String> {
+    let adapter = get_adapter(host);
+    Ok(adapter.uninstall())
 }
 
 #[tauri::command]
