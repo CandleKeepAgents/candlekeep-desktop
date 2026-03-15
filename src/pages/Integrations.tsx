@@ -1,26 +1,32 @@
+import { useState } from "react";
 import { IntegrationCard } from "../components/IntegrationCard";
 import { useIntegrations } from "../hooks/useIntegrations";
 import {
   installIntegration,
-  updateIntegration,
   repairIntegration,
+  uninstallIntegration,
+  updateIntegration,
 } from "../lib/tauri-commands";
 import type { HostKind } from "../lib/types";
-import { HOST_DISPLAY_NAMES, HOST_DESCRIPTIONS } from "../lib/types";
+import { HOST_DESCRIPTIONS, HOST_DISPLAY_NAMES } from "../lib/types";
 
 export function Integrations() {
   const { integrations, loading, refresh } = useIntegrations();
+  const [actionLoading, setActionLoading] = useState<HostKind | null>(null);
   const handleAction = async (
     host: HostKind,
-    action: "install" | "update" | "repair",
+    action: "install" | "uninstall" | "update" | "repair",
   ) => {
+    setActionLoading(host);
     try {
       const fn =
         action === "install"
           ? installIntegration
-          : action === "update"
-            ? updateIntegration
-            : repairIntegration;
+          : action === "uninstall"
+            ? uninstallIntegration
+            : action === "update"
+              ? updateIntegration
+              : repairIntegration;
       const result = await fn(host);
       if (!result.ok) {
         console.error(`${action} failed:`, result.message);
@@ -28,6 +34,8 @@ export function Integrations() {
       refresh();
     } catch (err) {
       console.error(`Failed to ${action} integration:`, err);
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -71,7 +79,9 @@ export function Integrations() {
               installed={integration.integration_installed}
               version={integration.version}
               status={getCardStatus(integration)}
+              loading={actionLoading === integration.host}
               onInstall={() => handleAction(integration.host, "install")}
+              onUninstall={() => handleAction(integration.host, "uninstall")}
               onUpdate={() => handleAction(integration.host, "update")}
             />
           ))}
