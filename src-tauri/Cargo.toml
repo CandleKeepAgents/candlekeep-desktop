@@ -1,6 +1,6 @@
 [package]
 name = "candlekeep-desktop"
-version = "1.2.0"
+version = "1.2.1"
 description = "CandleKeep desktop app for managing CLI, plugins, and integrations"
 authors = ["CandleKeep <support@getcandlekeep.com>"]
 edition = "2021"
