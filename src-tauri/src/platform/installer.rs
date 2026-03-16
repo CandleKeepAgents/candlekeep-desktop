@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
-use tracing::{info, error};
+use tracing::info;
 
 use super::{Platform, PlatformInfo};
 
@@ -58,28 +58,51 @@ pub async fn install_cli_from_github(platform_info: &PlatformInfo) -> ActionResu
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))
         .unwrap_or_else(|_| reqwest::Client::new());
-    let releases_url = "https://api.github.com/repos/CandleKeepAgents/candlekeep-cli/releases";
-    let response = match client
-        .get(releases_url)
-        .header("User-Agent", "candlekeep-desktop")
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            error!("Failed to fetch releases: {}", e);
-            return ActionResult::failure(format!("Failed to fetch releases: {}", e));
-        }
-    };
+    // Try homebrew-candlekeep repo first (has latest binaries), fall back to candlekeep-cli
+    let repos = [
+        "https://api.github.com/repos/CandleKeepAgents/homebrew-candlekeep/releases",
+        "https://api.github.com/repos/CandleKeepAgents/candlekeep-cli/releases",
+    ];
 
-    if !response.status().is_success() {
-        return ActionResult::failure(format!("GitHub API returned {}", response.status()));
+    let mut releases: Vec<serde_json::Value> = Vec::new();
+    for releases_url in &repos {
+        info!("Fetching CLI releases from {}", releases_url);
+        let response = match client
+            .get(*releases_url)
+            .header("User-Agent", "candlekeep-desktop")
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => r,
+            Ok(r) => {
+                info!("GitHub API returned {} for {}, trying next repo", r.status(), releases_url);
+                continue;
+            }
+            Err(e) => {
+                info!("Failed to fetch releases from {}: {}, trying next repo", releases_url, e);
+                continue;
+            }
+        };
+
+        match response.json::<Vec<serde_json::Value>>().await {
+            Ok(r) if !r.is_empty() => {
+                releases = r;
+                break;
+            }
+            Ok(_) => {
+                info!("No releases found at {}, trying next repo", releases_url);
+                continue;
+            }
+            Err(e) => {
+                info!("Failed to parse releases from {}: {}, trying next repo", releases_url, e);
+                continue;
+            }
+        }
     }
 
-    let releases: Vec<serde_json::Value> = match response.json().await {
-        Ok(r) => r,
-        Err(e) => return ActionResult::failure(format!("Failed to parse releases: {}", e)),
-    };
+    if releases.is_empty() {
+        return ActionResult::failure("Failed to fetch CLI releases from any source");
+    }
 
     // Find latest v* release
     let release = match releases.iter().find(|r| {
