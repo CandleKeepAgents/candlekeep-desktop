@@ -32,7 +32,7 @@ export interface AuthStatus {
 
 // --- Integration types ---
 
-export type HostKind = "claude_code" | "cursor" | "codex" | "amp";
+export type HostKind = "claude_code" | "cursor" | "codex" | "amp" | "open_code";
 
 export type RequirementStatus = "satisfied" | "missing" | "unsupported";
 
@@ -120,6 +120,7 @@ export const HOST_DISPLAY_NAMES: Record<HostKind, string> = {
   cursor: "Cursor",
   codex: "Codex",
   amp: "Amp",
+  open_code: "OpenCode",
 };
 
 export const HOST_DESCRIPTIONS: Record<HostKind, string> = {
@@ -130,4 +131,6 @@ export const HOST_DESCRIPTIONS: Record<HostKind, string> = {
   codex:
     "Connect your CandleKeep library to OpenAI Codex for enhanced coding workflows.",
   amp: "Access your CandleKeep library from Amp for AI-powered development.",
+  open_code:
+    "Use your CandleKeep library with OpenCode for AI-powered terminal development.",
 };
