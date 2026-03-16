@@ -7,44 +7,45 @@ use crate::platform::PlatformInfo;
 
 use super::{HostIntegration, HostKind, IntegrationStatus, Requirement, RequirementStatus};
 
-pub struct AmpAdapter;
+pub struct OpenCodeAdapter;
 
-impl AmpAdapter {
+impl OpenCodeAdapter {
     pub fn new() -> Self {
         Self
     }
 
-    /// Get the Amp config directory per platform.
+    /// Get the OpenCode config directory.
+    /// OpenCode looks for config at ~/.config/opencode/.opencode.json (among other locations).
     fn config_dir() -> Option<PathBuf> {
         let home = dirs::home_dir()?;
-        // Amp uses ~/.config/amp/ on all platforms
-        Some(home.join(".config").join("amp"))
+        Some(home.join(".config").join("opencode"))
     }
 
-    fn is_amp_installed() -> bool {
+    fn is_opencode_installed() -> bool {
         let info = PlatformInfo::detect();
-        paths::find_binary("amp", &info).is_some()
+        paths::find_binary("opencode", &info).is_some()
     }
 
-    fn mcp_config_path() -> Option<PathBuf> {
-        Self::config_dir().map(|d| d.join("settings.json"))
+    /// OpenCode config file is .opencode.json (note the leading dot).
+    fn config_path() -> Option<PathBuf> {
+        Self::config_dir().map(|d| d.join(".opencode.json"))
     }
 
     fn is_mcp_configured() -> bool {
-        let Some(path) = Self::mcp_config_path() else { return false };
+        let Some(path) = Self::config_path() else { return false };
         if !path.exists() { return false; }
 
         let Ok(content) = std::fs::read_to_string(&path) else { return false };
         let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else { return false };
 
-        json.get("amp.mcpServers")
+        json.get("mcpServers")
             .and_then(|s| s.get("candlekeep"))
             .is_some()
     }
 
     fn write_mcp_config() -> Result<(), String> {
-        let path = Self::mcp_config_path()
-            .ok_or("Could not determine Amp config path")?;
+        let path = Self::config_path()
+            .ok_or("Could not determine OpenCode config path")?;
 
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -53,7 +54,7 @@ impl AmpAdapter {
 
         let mut config: serde_json::Value = if path.exists() {
             let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("Failed to read settings.json: {}", e))?;
+                .map_err(|e| format!("Failed to read .opencode.json: {}", e))?;
             serde_json::from_str(&content)
                 .unwrap_or_else(|_| serde_json::json!({}))
         } else {
@@ -64,23 +65,26 @@ impl AmpAdapter {
         let ck_path = paths::find_binary("ck", &info)
             .ok_or("CandleKeep CLI (ck) not found. Install it first.")?;
 
+        // OpenCode uses: command (string), args (string[]), env (string[] of "KEY=value"),
+        // type: "stdio" for local servers
         let mut server_entry = serde_json::json!({
+            "type": "stdio",
             "command": ck_path.to_string_lossy(),
             "args": ["mcp", "serve"]
         });
 
-        // Add env.HOME so spawned process can find ~/.candlekeep/config.toml
+        // Add env as array of "KEY=value" strings so spawned process can find ~/.candlekeep/config.toml
         if let Some(home) = dirs::home_dir() {
             server_entry.as_object_mut().unwrap().insert(
                 "env".to_string(),
-                serde_json::json!({ "HOME": home.to_string_lossy() }),
+                serde_json::json!([format!("HOME={}", home.to_string_lossy())]),
             );
         }
 
         let servers = config
             .as_object_mut()
             .ok_or("Config is not an object")?
-            .entry("amp.mcpServers")
+            .entry("mcpServers")
             .or_insert_with(|| serde_json::json!({}));
 
         if let Some(servers_obj) = servers.as_object_mut() {
@@ -96,17 +100,17 @@ impl AmpAdapter {
     }
 }
 
-impl HostIntegration for AmpAdapter {
+impl HostIntegration for OpenCodeAdapter {
     fn kind(&self) -> HostKind {
-        HostKind::Amp
+        HostKind::OpenCode
     }
 
     fn detect_host(&self, _platform: &PlatformInfo) -> bool {
-        Self::is_amp_installed()
+        Self::is_opencode_installed()
     }
 
     fn detect_integration(&self) -> IntegrationStatus {
-        let host_installed = Self::is_amp_installed();
+        let host_installed = Self::is_opencode_installed();
         let integration_installed = Self::is_mcp_configured();
 
         let status = if !host_installed {
@@ -118,7 +122,7 @@ impl HostIntegration for AmpAdapter {
         };
 
         IntegrationStatus {
-            host: HostKind::Amp,
+            host: HostKind::OpenCode,
             host_installed,
             integration_installed,
             version: None,
@@ -129,19 +133,19 @@ impl HostIntegration for AmpAdapter {
     }
 
     fn uninstall(&self) -> ActionResult {
-        let Some(path) = Self::mcp_config_path() else {
-            return ActionResult::failure("Could not determine Amp config path");
+        let Some(path) = Self::config_path() else {
+            return ActionResult::failure("Could not determine OpenCode config path");
         };
         if !path.exists() {
             return ActionResult::success("Nothing to uninstall");
         }
         let Ok(content) = std::fs::read_to_string(&path) else {
-            return ActionResult::failure("Failed to read settings.json");
+            return ActionResult::failure("Failed to read .opencode.json");
         };
         let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&content) else {
-            return ActionResult::failure("Failed to parse settings.json");
+            return ActionResult::failure("Failed to parse .opencode.json");
         };
-        if let Some(servers) = config.get_mut("amp.mcpServers").and_then(|s| s.as_object_mut()) {
+        if let Some(servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
             servers.remove("candlekeep");
         }
         match serde_json::to_string_pretty(&config) {
@@ -149,8 +153,8 @@ impl HostIntegration for AmpAdapter {
                 if let Err(e) = std::fs::write(&path, output) {
                     return ActionResult::failure(format!("Failed to write config: {}", e));
                 }
-                info!("CandleKeep MCP server removed from Amp");
-                let mut result = ActionResult::success("CandleKeep removed from Amp");
+                info!("CandleKeep MCP server removed from OpenCode");
+                let mut result = ActionResult::success("CandleKeep removed from OpenCode");
                 result.restart_required = true;
                 result
             }
@@ -159,14 +163,14 @@ impl HostIntegration for AmpAdapter {
     }
 
     fn install(&self) -> ActionResult {
-        if !Self::is_amp_installed() {
-            return ActionResult::failure("Amp is not installed. Install Amp first.");
+        if !Self::is_opencode_installed() {
+            return ActionResult::failure("OpenCode is not installed. Install OpenCode first.");
         }
 
         match Self::write_mcp_config() {
             Ok(()) => {
-                info!("CandleKeep MCP server configured for Amp");
-                let mut result = ActionResult::success("CandleKeep configured for Amp");
+                info!("CandleKeep MCP server configured for OpenCode");
+                let mut result = ActionResult::success("CandleKeep configured for OpenCode");
                 result.restart_required = true;
                 result
             }
@@ -185,9 +189,9 @@ impl HostIntegration for AmpAdapter {
     fn requirements(&self, platform: &PlatformInfo) -> Vec<Requirement> {
         vec![
             Requirement {
-                name: "Amp".to_string(),
-                description: "Install Amp CLI".to_string(),
-                status: if Self::is_amp_installed() {
+                name: "OpenCode".to_string(),
+                description: "Install OpenCode CLI".to_string(),
+                status: if Self::is_opencode_installed() {
                     RequirementStatus::Satisfied
                 } else {
                     RequirementStatus::Missing

@@ -2,6 +2,7 @@ pub mod amp;
 pub mod claude_code;
 pub mod codex;
 pub mod cursor;
+pub mod opencode;
 
 use serde::{Deserialize, Serialize};
 
@@ -15,12 +16,13 @@ pub enum HostKind {
     Cursor,
     Codex,
     Amp,
+    OpenCode,
 }
 
 #[allow(dead_code)]
 impl HostKind {
     pub fn all() -> &'static [HostKind] {
-        &[HostKind::ClaudeCode, HostKind::Cursor, HostKind::Codex, HostKind::Amp]
+        &[HostKind::ClaudeCode, HostKind::Cursor, HostKind::Codex, HostKind::Amp, HostKind::OpenCode]
     }
 
     pub fn display_name(&self) -> &'static str {
@@ -29,6 +31,7 @@ impl HostKind {
             HostKind::Cursor => "Cursor",
             HostKind::Codex => "Codex",
             HostKind::Amp => "Amp",
+            HostKind::OpenCode => "OpenCode",
         }
     }
 
@@ -38,6 +41,7 @@ impl HostKind {
             HostKind::Cursor => "Use your CandleKeep library as context in Cursor IDE for smarter code assistance.",
             HostKind::Codex => "Connect your CandleKeep library to OpenAI Codex for enhanced coding workflows.",
             HostKind::Amp => "Access your CandleKeep library from Amp for AI-powered development.",
+            HostKind::OpenCode => "Use your CandleKeep library with OpenCode for AI-powered terminal development.",
         }
     }
 }
@@ -90,6 +94,7 @@ pub fn get_adapter(kind: HostKind) -> Box<dyn HostIntegration> {
         HostKind::Cursor => Box::new(cursor::CursorAdapter::new()),
         HostKind::Codex => Box::new(codex::CodexAdapter::new()),
         HostKind::Amp => Box::new(amp::AmpAdapter::new()),
+        HostKind::OpenCode => Box::new(opencode::OpenCodeAdapter::new()),
     }
 }
 
