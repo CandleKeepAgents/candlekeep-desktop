@@ -1,24 +1,26 @@
-import { ExternalLink, KeyRound, Loader2, RefreshCw } from "lucide-react";
+import { ExternalLink, KeyRound, Loader2, MessageCircle, RefreshCw } from "lucide-react";
 
 interface QuickActionsProps {
   onOpenLibrary: () => void;
   onReAuth: () => void;
   onCheckUpdates: () => void;
+  onJoinSlack: () => void;
   updatesLoading?: boolean;
   authLoading?: boolean;
 }
 
-export function QuickActions({ onOpenLibrary, onReAuth, onCheckUpdates, updatesLoading, authLoading }: QuickActionsProps) {
+export function QuickActions({ onOpenLibrary, onReAuth, onCheckUpdates, onJoinSlack, updatesLoading, authLoading }: QuickActionsProps) {
   const actions = [
     { icon: ExternalLink, label: "Open Library", onClick: onOpenLibrary },
     { icon: authLoading ? Loader2 : KeyRound, label: authLoading ? "Authenticating..." : "Re-authenticate", onClick: onReAuth, spinning: authLoading, disabled: authLoading },
     { icon: updatesLoading ? Loader2 : RefreshCw, label: updatesLoading ? "Checking..." : "Check Updates", onClick: onCheckUpdates, spinning: updatesLoading },
+    { icon: MessageCircle, label: "Join Slack", onClick: onJoinSlack },
   ];
 
   return (
     <div className="space-y-2">
       <h3 className="text-sm font-medium text-zinc-300">Quick Actions</h3>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         {actions.map((action) => (
           <button
             type="button"

@@ -94,6 +94,22 @@ pnpm exec tsc --noEmit  # TypeScript type check
 3. Add a typed wrapper in `src/lib/tauri-commands.ts`
 4. Add any new types to `src/lib/types.ts`
 
+## Release Process
+
+Version is defined in 4 files that must stay in sync:
+- `package.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock`
+- `src-tauri/tauri.conf.json`
+
+### Steps to release
+1. **Version bump**: Run the GitHub Actions "Version Bump" workflow (`.github/workflows/version-bump.yml`) with the new version — it updates all 4 files and creates a PR on `release/v{X.Y.Z}`
+2. **Merge PR**: Review and merge the version bump PR into `main`
+3. **Tag**: `git tag v{X.Y.Z} && git push origin v{X.Y.Z}`
+4. **Release**: The release workflow (`.github/workflows/release.yml`) triggers automatically on tag push — builds macOS/Linux/Windows, code-signs macOS, and publishes to GitHub Releases with auto-generated changelog from commit messages
+
+No manual CHANGELOG.md — release notes are auto-generated from git log between tags.
+
 ## Adding a New Integration
 
 1. Create `src-tauri/src/integrations/new_ide.rs` implementing the `Integration` trait

@@ -64,6 +64,14 @@ export function Dashboard() {
     }
   };
 
+  const handleJoinSlack = async () => {
+    try {
+      await openUrl("https://join.slack.com/t/candlekeepgroup/shared_invite/zt-3sxxll6kg-McekCEeUQJz6Eh2xqS7v8A");
+    } catch (err) {
+      console.error("Failed to open Slack:", err);
+    }
+  };
+
   const clearAuthPolling = useCallback(() => {
     if (authPollRef.current) {
       clearInterval(authPollRef.current);
@@ -251,6 +259,7 @@ export function Dashboard() {
         onOpenLibrary={handleOpenLibrary}
         onReAuth={handleReAuth}
         onCheckUpdates={handleCheckUpdates}
+        onJoinSlack={handleJoinSlack}
         updatesLoading={checkingUpdates}
         authLoading={authenticating}
       />
