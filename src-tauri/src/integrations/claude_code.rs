@@ -1,9 +1,9 @@
 use std::path::PathBuf;
-use std::process::Command;
 use tracing::{info, warn, error, debug};
 
 use crate::platform::installer::ActionResult;
 use crate::platform::paths;
+use crate::platform::shell;
 use crate::platform::PlatformInfo;
 
 use super::{HostIntegration, HostKind, IntegrationStatus, Requirement, RequirementStatus};
@@ -126,11 +126,11 @@ impl HostIntegration for ClaudeCodeAdapter {
         let path_env = paths::get_full_path(&info);
 
         // Step 1: Add marketplace
-        let output1 = match Command::new("sh")
-            .arg("-c")
-            .arg("claude /plugin marketplace add CandleKeepAgents/candlekeep-marketplace")
-            .env("PATH", &path_env)
-            .output()
+        let output1 = match shell::shell_command(
+            "claude /plugin marketplace add CandleKeepAgents/candlekeep-marketplace",
+            &path_env,
+        )
+        .output()
         {
             Ok(o) => o,
             Err(e) => return ActionResult::failure(format!("Failed to add marketplace: {}", e)),
@@ -143,11 +143,11 @@ impl HostIntegration for ClaudeCodeAdapter {
         }
 
         // Step 2: Install plugin
-        let output2 = match Command::new("sh")
-            .arg("-c")
-            .arg("claude /plugin install candlekeep-cloud@candlekeep")
-            .env("PATH", &path_env)
-            .output()
+        let output2 = match shell::shell_command(
+            "claude /plugin install candlekeep-cloud@candlekeep",
+            &path_env,
+        )
+        .output()
         {
             Ok(o) => o,
             Err(e) => return ActionResult::failure(format!("Failed to install plugin: {}", e)),
@@ -175,11 +175,11 @@ impl HostIntegration for ClaudeCodeAdapter {
         let info = PlatformInfo::detect();
         let path_env = paths::get_full_path(&info);
 
-        let output = match Command::new("sh")
-            .arg("-c")
-            .arg("claude /plugin uninstall candlekeep-cloud@candlekeep")
-            .env("PATH", &path_env)
-            .output()
+        let output = match shell::shell_command(
+            "claude /plugin uninstall candlekeep-cloud@candlekeep",
+            &path_env,
+        )
+        .output()
         {
             Ok(o) => o,
             Err(e) => return ActionResult::failure(format!("Failed to uninstall plugin: {}", e)),
@@ -199,11 +199,11 @@ impl HostIntegration for ClaudeCodeAdapter {
         let info = PlatformInfo::detect();
         let path_env = paths::get_full_path(&info);
 
-        let output = match Command::new("sh")
-            .arg("-c")
-            .arg("claude /plugin marketplace add CandleKeepAgents/candlekeep-marketplace")
-            .env("PATH", &path_env)
-            .output()
+        let output = match shell::shell_command(
+            "claude /plugin marketplace add CandleKeepAgents/candlekeep-marketplace",
+            &path_env,
+        )
+        .output()
         {
             Ok(o) => o,
             Err(e) => return ActionResult::failure(format!("Failed to update plugin: {}", e)),

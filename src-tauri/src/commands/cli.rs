@@ -6,8 +6,7 @@ use tracing::{info, warn, error};
 use crate::platform::{Platform, PlatformInfo};
 use crate::platform::installer;
 use crate::platform::paths;
-
-use super::system::get_full_path;
+use crate::platform::shell;
 
 #[derive(Debug, Serialize)]
 pub struct CliStatus {
@@ -145,18 +144,20 @@ pub async fn get_latest_cli_version() -> Result<Option<String>, String> {
 pub async fn install_cli() -> Result<String, String> {
     let platform_info = PlatformInfo::detect();
 
+    let path_env = paths::get_full_path(&platform_info);
+
     match platform_info.platform {
         Platform::MacOS => {
             // Use Homebrew on macOS
-            let output = Command::new("sh")
-                .arg("-c")
-                .arg("brew install CandleKeepAgents/candlekeep/candlekeep-cli")
-                .env("PATH", get_full_path())
-                .output()
-                .map_err(|e| {
-                    error!("Failed to start CLI installation: {}", e);
-                    format!("Failed to start CLI installation: {}", e)
-                })?;
+            let output = shell::shell_command(
+                "brew install CandleKeepAgents/candlekeep/candlekeep-cli",
+                &path_env,
+            )
+            .output()
+            .map_err(|e| {
+                error!("Failed to start CLI installation: {}", e);
+                format!("Failed to start CLI installation: {}", e)
+            })?;
 
             if output.status.success() {
                 info!("CLI installed successfully via Homebrew");
@@ -185,17 +186,19 @@ pub async fn install_cli() -> Result<String, String> {
 pub async fn update_cli() -> Result<String, String> {
     let platform_info = PlatformInfo::detect();
 
+    let path_env = paths::get_full_path(&platform_info);
+
     match platform_info.platform {
         Platform::MacOS => {
-            let output = Command::new("sh")
-                .arg("-c")
-                .arg("brew upgrade candlekeep-cli")
-                .env("PATH", get_full_path())
-                .output()
-                .map_err(|e| {
-                    error!("Failed to start CLI update: {}", e);
-                    format!("Failed to start CLI update: {}", e)
-                })?;
+            let output = shell::shell_command(
+                "brew upgrade candlekeep-cli",
+                &path_env,
+            )
+            .output()
+            .map_err(|e| {
+                error!("Failed to start CLI update: {}", e);
+                format!("Failed to start CLI update: {}", e)
+            })?;
 
             if output.status.success() {
                 info!("CLI updated successfully");

@@ -1,9 +1,8 @@
 use serde::Serialize;
 use std::path::PathBuf;
-use std::process::Command;
 use tracing::{info, warn, error, debug};
 
-use super::system::get_full_path;
+use crate::platform::{PlatformInfo, paths, shell};
 
 #[derive(Debug, Serialize)]
 pub struct PluginStatus {
@@ -107,16 +106,17 @@ pub async fn get_plugin_version() -> Result<Option<String>, String> {
 
 #[tauri::command]
 pub async fn install_plugin() -> Result<String, String> {
-    let path_env = get_full_path();
+    let info = PlatformInfo::detect();
+    let path_env = paths::get_full_path(&info);
     debug!("install_plugin using PATH: {}", path_env);
 
     // Step 1: Add marketplace
-    let output1 = Command::new("sh")
-        .arg("-c")
-        .arg("claude /plugin marketplace add CandleKeepAgents/candlekeep-marketplace")
-        .env("PATH", &path_env)
-        .output()
-        .map_err(|e| format!("Failed to add marketplace: {}", e))?;
+    let output1 = shell::shell_command(
+        "claude /plugin marketplace add CandleKeepAgents/candlekeep-marketplace",
+        &path_env,
+    )
+    .output()
+    .map_err(|e| format!("Failed to add marketplace: {}", e))?;
 
     let stdout1 = String::from_utf8_lossy(&output1.stdout);
     let stderr1 = String::from_utf8_lossy(&output1.stderr);
@@ -129,15 +129,15 @@ pub async fn install_plugin() -> Result<String, String> {
     }
 
     // Step 2: Install plugin
-    let output2 = Command::new("sh")
-        .arg("-c")
-        .arg("claude /plugin install candlekeep-cloud@candlekeep")
-        .env("PATH", &path_env)
-        .output()
-        .map_err(|e| {
-            error!("Failed to install plugin: {}", e);
-            format!("Failed to install plugin: {}", e)
-        })?;
+    let output2 = shell::shell_command(
+        "claude /plugin install candlekeep-cloud@candlekeep",
+        &path_env,
+    )
+    .output()
+    .map_err(|e| {
+        error!("Failed to install plugin: {}", e);
+        format!("Failed to install plugin: {}", e)
+    })?;
 
     let stdout2 = String::from_utf8_lossy(&output2.stdout);
     let stderr2 = String::from_utf8_lossy(&output2.stderr);
@@ -164,16 +164,17 @@ pub async fn install_plugin() -> Result<String, String> {
 
 #[tauri::command]
 pub async fn update_plugin() -> Result<String, String> {
-    let path_env = get_full_path();
+    let info = PlatformInfo::detect();
+    let path_env = paths::get_full_path(&info);
     debug!("update_plugin using PATH: {}", path_env);
 
     // Re-add marketplace to get latest
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg("claude /plugin marketplace add CandleKeepAgents/candlekeep-marketplace")
-        .env("PATH", &path_env)
-        .output()
-        .map_err(|e| format!("Failed to update plugin: {}", e))?;
+    let output = shell::shell_command(
+        "claude /plugin marketplace add CandleKeepAgents/candlekeep-marketplace",
+        &path_env,
+    )
+    .output()
+    .map_err(|e| format!("Failed to update plugin: {}", e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -191,21 +192,6 @@ pub async fn update_plugin() -> Result<String, String> {
 
 #[tauri::command]
 pub async fn check_claude_code_installed() -> Result<bool, String> {
-    // Check known paths directly (macOS GUI apps don't inherit shell PATH)
-    let known_paths = [
-        PathBuf::from("/opt/homebrew/bin/claude"),
-        PathBuf::from("/usr/local/bin/claude"),
-    ];
-    if let Some(home) = dirs::home_dir() {
-        let local_bin = home.join(".local/bin/claude");
-        if local_bin.exists() {
-            return Ok(true);
-        }
-    }
-    for p in &known_paths {
-        if p.exists() {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+    let info = PlatformInfo::detect();
+    Ok(paths::find_binary("claude", &info).is_some())
 }

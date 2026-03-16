@@ -70,7 +70,13 @@ pub fn setup_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => {
             // On Linux, tray may fail if no system tray is available.
             // Fall back to showing the window directly.
-            #[cfg(target_os = "linux")]
+            // On macOS, tray is essential — propagate the error.
+            #[cfg(target_os = "macos")]
+            {
+                return Err(e.into());
+            }
+            // On Linux/Windows, tray may fail — fall back to showing the window directly.
+            #[cfg(not(target_os = "macos"))]
             {
                 tracing::warn!("Tray creation failed, showing window directly: {}", e);
                 if let Some(window) = app.get_webview_window("main") {
@@ -78,10 +84,6 @@ pub fn setup_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = window.set_focus();
                 }
                 return Ok(());
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                return Err(e.into());
             }
         }
     }

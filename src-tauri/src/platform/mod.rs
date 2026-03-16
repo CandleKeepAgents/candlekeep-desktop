@@ -1,5 +1,6 @@
 pub mod installer;
 pub mod paths;
+pub mod shell;
 pub mod tray;
 
 use serde::Serialize;
