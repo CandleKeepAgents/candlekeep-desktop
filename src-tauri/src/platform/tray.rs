@@ -88,10 +88,14 @@ pub fn setup_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Hide from dock on macOS
+    // Hide from dock on macOS — but only after setup is complete so
+    // first-time users can see the app in the dock.
     #[cfg(target_os = "macos")]
     {
-        app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+        let state = crate::state::AppState::load();
+        if state.setup_completed {
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+        }
     }
 
     Ok(())

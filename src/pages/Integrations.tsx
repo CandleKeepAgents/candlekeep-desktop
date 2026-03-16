@@ -8,18 +8,20 @@ import {
   updateIntegration,
 } from "../lib/tauri-commands";
 import type { HostKind } from "../lib/types";
-import { HOST_DESCRIPTIONS, HOST_DISPLAY_NAMES } from "../lib/types";
+import { HOST_DESCRIPTIONS, HOST_DISPLAY_NAMES, HOST_SETUP_HINTS } from "../lib/types";
 
 export function Integrations() {
   const { integrations, loading, refresh } = useIntegrations();
   const [actionLoading, setActionLoading] = useState<HostKind | null>(null);
   const [errorMessage, setErrorMessage] = useState<{host: HostKind; message: string} | null>(null);
+  const [successMessage, setSuccessMessage] = useState<{host: HostKind; message: string} | null>(null);
   const handleAction = async (
     host: HostKind,
     action: "install" | "uninstall" | "update" | "repair",
   ) => {
     setActionLoading(host);
     setErrorMessage(null);
+    setSuccessMessage(null);
     try {
       const fn =
         action === "install"
@@ -34,6 +36,10 @@ export function Integrations() {
         console.error(`${action} failed:`, result.message);
         setErrorMessage({ host, message: result.message });
         setTimeout(() => setErrorMessage((prev) => prev?.host === host ? null : prev), 5000);
+      } else {
+        const verb = action === "install" ? "set up" : action === "uninstall" ? "removed" : "updated";
+        setSuccessMessage({ host, message: `Successfully ${verb} CandleKeep for ${HOST_DISPLAY_NAMES[host]}.` });
+        setTimeout(() => setSuccessMessage((prev) => prev?.host === host ? null : prev), 3000);
       }
       refresh();
     } catch (err) {
@@ -97,6 +103,8 @@ export function Integrations() {
                 status={getCardStatus(integration)}
                 loading={actionLoading === integration.host}
                 error={errorMessage?.host === integration.host ? errorMessage.message : undefined}
+                setupHint={HOST_SETUP_HINTS[integration.host]}
+                successMessage={successMessage?.host === integration.host ? successMessage.message : undefined}
                 onInstall={() => handleAction(integration.host, "install")}
                 onUninstall={() => handleAction(integration.host, "uninstall")}
                 onUpdate={() => handleAction(integration.host, "update")}

@@ -166,7 +166,7 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
       const host = selectedHosts[i];
       setStepState({
         status: "running",
-        message: `Installing CandleKeep for ${HOST_DISPLAY_NAMES[host]}... (${i + 1}/${total})`,
+        message: `Setting up CandleKeep for ${HOST_DISPLAY_NAMES[host]}... (${i + 1}/${total})`,
       });
       try {
         const result = await cmd.installIntegration(host);
@@ -220,6 +220,10 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
           <p className="text-sm text-zinc-400 max-w-xs">
             Let&apos;s set up everything you need to access your document
             library from your AI coding tools.
+          </p>
+          <p className="text-xs text-zinc-500 max-w-xs">
+            After setup, CandleKeep lives in your menu bar — click the
+            icon anytime to open it.
           </p>
         </div>
         <button
@@ -318,7 +322,10 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         </div>
         <button
           type="button"
-          onClick={onComplete}
+          onClick={() => {
+            cmd.markSetupComplete().catch(console.error);
+            onComplete();
+          }}
           className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-medium transition-colors"
         >
           Go to Dashboard
@@ -368,7 +375,7 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         <StepCard
           title="Connect Your AI Tools"
           description={`This will configure CandleKeep for ${selectedHosts.map((h) => HOST_DISPLAY_NAMES[h]).join(", ")}.`}
-          actionLabel={`Install ${selectedHosts.length > 1 ? `${selectedHosts.length} Integrations` : "Integration"}`}
+          actionLabel={`Set up ${selectedHosts.length > 1 ? `${selectedHosts.length} integrations` : "integration"}`}
           onAction={handleInstallIntegrations}
           disabled={stepState.status === "running"}
         />

@@ -33,6 +33,9 @@ export const checkAuthStatus = () => invoke<AuthStatus>("check_auth_status");
 export const triggerAuthLogin = () => invoke<string>("trigger_auth_login");
 export const authLogout = () => invoke<string>("auth_logout");
 
+// --- State commands ---
+export const markSetupComplete = () => invoke<void>("mark_setup_complete");
+
 // --- Generic integration commands ---
 export const listIntegrations = () =>
   invoke<IntegrationStatus[]>("list_integrations");

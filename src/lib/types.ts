@@ -122,6 +122,14 @@ export const HOST_DISPLAY_NAMES: Record<HostKind, string> = {
   open_code: "OpenCode",
 };
 
+export const HOST_SETUP_HINTS: Record<HostKind, string> = {
+  claude_code: "Adds the CandleKeep plugin so you can search your library during conversations.",
+  cursor: "Adds an MCP server entry so your library is available as context.",
+  codex: "Configures CandleKeep as a provider in your Codex setup.",
+  amp: "Configures CandleKeep in your Amp settings.",
+  open_code: "Adds CandleKeep to your OpenCode configuration.",
+};
+
 export const HOST_DESCRIPTIONS: Record<HostKind, string> = {
   claude_code:
     "Access your CandleKeep library directly from Claude Code with AI-powered search and document management.",
