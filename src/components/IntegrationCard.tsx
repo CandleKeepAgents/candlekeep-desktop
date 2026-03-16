@@ -7,6 +7,7 @@ interface IntegrationCardProps {
   version?: string | null;
   status: "installed" | "available" | "update-available" | "coming-soon";
   loading?: boolean;
+  error?: string;
   onInstall?: () => void;
   onUninstall?: () => void;
   onUpdate?: () => void;
@@ -18,6 +19,7 @@ export function IntegrationCard({
   version,
   status,
   loading,
+  error,
   onInstall,
   onUninstall,
   onUpdate,
@@ -57,6 +59,9 @@ export function IntegrationCard({
         {statusBadge[status]}
       </div>
       <p className="text-xs text-zinc-400 mb-3">{description}</p>
+      {error && (
+        <p className="text-xs text-red-400 mb-2">{error}</p>
+      )}
       {status === "available" && onInstall && (
         <button
           type="button"

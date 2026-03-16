@@ -15,20 +15,28 @@ impl OpenCodeAdapter {
     }
 
     /// Get the OpenCode config directory.
-    /// OpenCode looks for config at ~/.config/opencode/.opencode.json (among other locations).
+    /// OpenCode v1.2+ uses ~/.config/opencode/opencode.json for global config.
     fn config_dir() -> Option<PathBuf> {
         let home = dirs::home_dir()?;
         Some(home.join(".config").join("opencode"))
     }
 
     fn is_opencode_installed() -> bool {
+        if let Some(home) = dirs::home_dir() {
+            if home.join(".opencode/bin/opencode").exists() {
+                return true;
+            }
+            if home.join("go/bin/opencode").exists() {
+                return true;
+            }
+        }
         let info = PlatformInfo::detect();
         paths::find_binary("opencode", &info).is_some()
     }
 
-    /// OpenCode config file is .opencode.json (note the leading dot).
+    /// OpenCode v1.2+ config file is opencode.json (no leading dot).
     fn config_path() -> Option<PathBuf> {
-        Self::config_dir().map(|d| d.join(".opencode.json"))
+        Self::config_dir().map(|d| d.join("opencode.json"))
     }
 
     fn is_mcp_configured() -> bool {
@@ -38,7 +46,8 @@ impl OpenCodeAdapter {
         let Ok(content) = std::fs::read_to_string(&path) else { return false };
         let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else { return false };
 
-        json.get("mcpServers")
+        // OpenCode v1.2+ uses "mcp" key (not "mcpServers")
+        json.get("mcp")
             .and_then(|s| s.get("candlekeep"))
             .is_some()
     }
@@ -54,7 +63,7 @@ impl OpenCodeAdapter {
 
         let mut config: serde_json::Value = if path.exists() {
             let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("Failed to read .opencode.json: {}", e))?;
+                .map_err(|e| format!("Failed to read opencode.json: {}", e))?;
             serde_json::from_str(&content)
                 .unwrap_or_else(|_| serde_json::json!({}))
         } else {
@@ -65,26 +74,16 @@ impl OpenCodeAdapter {
         let ck_path = paths::find_binary("ck", &info)
             .ok_or("CandleKeep CLI (ck) not found. Install it first.")?;
 
-        // OpenCode uses: command (string), args (string[]), env (string[] of "KEY=value"),
-        // type: "stdio" for local servers
-        let mut server_entry = serde_json::json!({
-            "type": "stdio",
-            "command": ck_path.to_string_lossy(),
-            "args": ["mcp", "serve"]
+        // OpenCode v1.2+ format: type "local", command is an array [binary, ...args]
+        let server_entry = serde_json::json!({
+            "type": "local",
+            "command": [ck_path.to_string_lossy(), "mcp", "serve"]
         });
-
-        // Add env as array of "KEY=value" strings so spawned process can find ~/.candlekeep/config.toml
-        if let Some(home) = dirs::home_dir() {
-            server_entry.as_object_mut().unwrap().insert(
-                "env".to_string(),
-                serde_json::json!([format!("HOME={}", home.to_string_lossy())]),
-            );
-        }
 
         let servers = config
             .as_object_mut()
             .ok_or("Config is not an object")?
-            .entry("mcpServers")
+            .entry("mcp")
             .or_insert_with(|| serde_json::json!({}));
 
         if let Some(servers_obj) = servers.as_object_mut() {
@@ -140,12 +139,12 @@ impl HostIntegration for OpenCodeAdapter {
             return ActionResult::success("Nothing to uninstall");
         }
         let Ok(content) = std::fs::read_to_string(&path) else {
-            return ActionResult::failure("Failed to read .opencode.json");
+            return ActionResult::failure("Failed to read opencode.json");
         };
         let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&content) else {
-            return ActionResult::failure("Failed to parse .opencode.json");
+            return ActionResult::failure("Failed to parse opencode.json");
         };
-        if let Some(servers) = config.get_mut("mcpServers").and_then(|s| s.as_object_mut()) {
+        if let Some(servers) = config.get_mut("mcp").and_then(|s| s.as_object_mut()) {
             servers.remove("candlekeep");
         }
         match serde_json::to_string_pretty(&config) {
