@@ -66,7 +66,19 @@ pub fn setup_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         .build(app);
 
     match result {
-        Ok(_) => {}
+        Ok(_) => {
+            // On non-macOS, show the window immediately after tray setup.
+            // macOS has an always-visible menu bar tray, but on Windows/Linux
+            // the tray icon may be hidden in the overflow area, so users
+            // wouldn't know the app is running.
+            #[cfg(not(target_os = "macos"))]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        }
         Err(e) => {
             // On Linux, tray may fail if no system tray is available.
             // Fall back to showing the window directly.
