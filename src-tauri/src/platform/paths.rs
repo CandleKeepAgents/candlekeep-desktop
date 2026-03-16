@@ -60,7 +60,29 @@ pub fn find_binary(name: &str, info: &PlatformInfo) -> Option<PathBuf> {
         }
     }
 
-    // 3. Windows: check .cmd wrappers (npm global installs)
+    // 3. Homebrew Cellar fallback (brew may install without creating /opt/homebrew/bin symlink)
+    #[cfg(target_os = "macos")]
+    {
+        let cellar_base = std::path::Path::new("/opt/homebrew/Cellar/candlekeep-cli");
+        if cellar_base.exists() {
+            if let Ok(entries) = std::fs::read_dir(cellar_base) {
+                let mut versions: Vec<std::path::PathBuf> = entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir())
+                    .collect();
+                versions.sort();
+                if let Some(latest) = versions.last() {
+                    let candidate = latest.join("bin").join(&exe);
+                    if candidate.exists() {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Windows: check .cmd wrappers (npm global installs)
     #[cfg(target_os = "windows")]
     {
         for dir in &info.paths.extra_bin_dirs {
@@ -71,7 +93,7 @@ pub fn find_binary(name: &str, info: &PlatformInfo) -> Option<PathBuf> {
         }
     }
 
-    // 4. Fallback: which/where with expanded PATH
+    // 5. Fallback: which/where with expanded PATH
     let which_cmd = if cfg!(windows) { "where.exe" } else { "which" };
     Command::new(which_cmd)
         .arg(name)

@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { Toaster } from "sonner";
 import { checkAuthStatus, checkCliInstalled } from "./lib/tauri-commands";
 import { Dashboard } from "./pages/Dashboard";
 import { Integrations } from "./pages/Integrations";
@@ -62,6 +63,7 @@ function App() {
 
   return (
     <div className="flex flex-col h-screen bg-zinc-900 text-zinc-100">
+      <Toaster theme="dark" position="top-center" richColors />
       {/* Header — sticky, draggable */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: header uses onMouseDown for Tauri window dragging */}
       <header

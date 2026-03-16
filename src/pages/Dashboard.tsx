@@ -1,5 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { MetricsCard } from "../components/MetricsCard";
 import { QuickActions } from "../components/QuickActions";
 import { StatusCard } from "../components/StatusCard";
@@ -39,6 +40,7 @@ export function Dashboard() {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [appUpdate, setAppUpdate] = useState<AppUpdateInfo | null>(null);
   const [updatingApp, setUpdatingApp] = useState(false);
+  const [updatingCli, setUpdatingCli] = useState(false);
   const [authenticating, setAuthenticating] = useState(false);
   const authPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -131,11 +133,19 @@ export function Dashboard() {
   };
 
   const handleUpdateCli = async () => {
+    if (updatingCli) return;
+    setUpdatingCli(true);
     try {
       await updateCli();
-      refreshCli();
+      await refreshCli();
+      toast.success("CLI updated successfully");
     } catch (err) {
       console.error("Failed to update CLI:", err);
+      toast.error("Failed to update CLI", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setUpdatingCli(false);
     }
   };
 
@@ -149,10 +159,16 @@ export function Dashboard() {
     setUpdatingApp(true);
     try {
       await installAppUpdate(appUpdate.asset_url);
+      toast.success("App update downloaded — installing...");
     } catch (err) {
       console.error("Failed to install app update:", err);
       if (appUpdate?.download_url) {
+        toast.info("Opening download page in browser");
         await openUrl(appUpdate.download_url);
+      } else {
+        toast.error("Failed to install app update", {
+          description: err instanceof Error ? err.message : String(err),
+        });
       }
     } finally {
       setUpdatingApp(false);
@@ -179,6 +195,7 @@ export function Dashboard() {
           currentVersion={cliStatus.version}
           latestVersion={latestVersion}
           onUpdate={handleUpdateCli}
+          loading={updatingCli}
         />
       )}
 
