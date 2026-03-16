@@ -21,7 +21,23 @@ pub fn run() {
         .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
         .init();
 
+    // Install a panic hook that writes crash info to a log file
+    let crash_log_dir = log_dir.clone();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = format!("PANIC: {}", info);
+        eprintln!("{}", msg);
+        let crash_path = crash_log_dir.join("crash.log");
+        let _ = std::fs::write(&crash_path, &msg);
+    }));
+
+    let platform_info = platform::PlatformInfo::detect();
     tracing::info!("CandleKeep Desktop starting");
+    tracing::info!(
+        "Platform: {:?}, Arch: {}, Log dir: {}",
+        platform_info.platform,
+        platform_info.arch,
+        log_dir.display()
+    );
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

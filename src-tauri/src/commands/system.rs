@@ -5,7 +5,8 @@ use crate::platform::{self, PlatformInfo};
 use crate::platform::paths;
 
 /// Build a PATH that includes platform-specific tool directories.
-/// Delegates to the platform layer.
+/// Delegates to the platform layer. Used by tests.
+#[cfg(test)]
 pub fn get_full_path() -> String {
     let info = PlatformInfo::detect();
     paths::get_full_path(&info)
