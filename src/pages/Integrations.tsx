@@ -13,11 +13,13 @@ import { HOST_DESCRIPTIONS, HOST_DISPLAY_NAMES } from "../lib/types";
 export function Integrations() {
   const { integrations, loading, refresh } = useIntegrations();
   const [actionLoading, setActionLoading] = useState<HostKind | null>(null);
+  const [errorMessage, setErrorMessage] = useState<{host: HostKind; message: string} | null>(null);
   const handleAction = async (
     host: HostKind,
     action: "install" | "uninstall" | "update" | "repair",
   ) => {
     setActionLoading(host);
+    setErrorMessage(null);
     try {
       const fn =
         action === "install"
@@ -30,10 +32,15 @@ export function Integrations() {
       const result = await fn(host);
       if (!result.ok) {
         console.error(`${action} failed:`, result.message);
+        setErrorMessage({ host, message: result.message });
+        setTimeout(() => setErrorMessage((prev) => prev?.host === host ? null : prev), 5000);
       }
       refresh();
     } catch (err) {
-      console.error(`Failed to ${action} integration:`, err);
+      const message = `Failed to ${action} integration: ${err}`;
+      console.error(message);
+      setErrorMessage({ host, message });
+      setTimeout(() => setErrorMessage((prev) => prev?.host === host ? null : prev), 5000);
     } finally {
       setActionLoading(null);
     }
@@ -71,20 +78,31 @@ export function Integrations() {
         </div>
       ) : (
         <div className="space-y-3">
-          {integrations.map((integration) => (
-            <IntegrationCard
-              key={integration.host}
-              name={HOST_DISPLAY_NAMES[integration.host]}
-              description={HOST_DESCRIPTIONS[integration.host]}
-              installed={integration.integration_installed}
-              version={integration.version}
-              status={getCardStatus(integration)}
-              loading={actionLoading === integration.host}
-              onInstall={() => handleAction(integration.host, "install")}
-              onUninstall={() => handleAction(integration.host, "uninstall")}
-              onUpdate={() => handleAction(integration.host, "update")}
-            />
-          ))}
+          {(() => {
+            const visible = integrations.filter(i => i.host_installed);
+            if (visible.length === 0) {
+              return (
+                <div className="text-center text-sm text-zinc-400 py-8">
+                  No AI coding tools detected. Install one to get started.
+                </div>
+              );
+            }
+            return visible.map((integration) => (
+              <IntegrationCard
+                key={integration.host}
+                name={HOST_DISPLAY_NAMES[integration.host]}
+                description={HOST_DESCRIPTIONS[integration.host]}
+                installed={integration.integration_installed}
+                version={integration.version}
+                status={getCardStatus(integration)}
+                loading={actionLoading === integration.host}
+                error={errorMessage?.host === integration.host ? errorMessage.message : undefined}
+                onInstall={() => handleAction(integration.host, "install")}
+                onUninstall={() => handleAction(integration.host, "uninstall")}
+                onUpdate={() => handleAction(integration.host, "update")}
+              />
+            ));
+          })()}
         </div>
       )}
     </div>

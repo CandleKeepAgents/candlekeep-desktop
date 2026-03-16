@@ -236,7 +236,7 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
 
   // --- Host picker screen (multi-select) ---
   if (currentStep === "host-picker") {
-    const hosts: HostKind[] = ["claude_code", "cursor", "codex", "amp"];
+    const hosts: HostKind[] = ["claude_code", "cursor", "codex", "amp", "open_code"];
     const toggleHost = (host: HostKind) => {
       setSelectedHosts((prev) =>
         prev.includes(host) ? prev.filter((h) => h !== host) : [...prev, host],

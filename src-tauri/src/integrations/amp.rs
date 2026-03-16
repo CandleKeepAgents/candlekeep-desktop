@@ -22,6 +22,11 @@ impl AmpAdapter {
     }
 
     fn is_amp_installed() -> bool {
+        if let Some(home) = dirs::home_dir() {
+            if home.join(".amp/bin/amp").exists() {
+                return true;
+            }
+        }
         let info = PlatformInfo::detect();
         paths::find_binary("amp", &info).is_some()
     }
