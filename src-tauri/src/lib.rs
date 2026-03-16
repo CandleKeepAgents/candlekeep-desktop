@@ -41,10 +41,19 @@ pub fn run() {
     );
 
     #[tauri::command]
-    fn mark_setup_complete() -> Result<(), String> {
+    fn mark_setup_complete(app_handle: tauri::AppHandle) -> Result<(), String> {
         let mut app_state = state::AppState::load();
         app_state.setup_completed = true;
-        app_state.save()
+        app_state.save()?;
+
+        // Now that setup is done, hide from dock
+        #[cfg(target_os = "macos")]
+        let _ = app_handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+        #[cfg(not(target_os = "macos"))]
+        let _ = &app_handle;
+
+        Ok(())
     }
 
     tauri::Builder::default()
