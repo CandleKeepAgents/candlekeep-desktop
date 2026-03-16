@@ -29,17 +29,16 @@ impl ActionResult {
     }
 }
 
-/// Install CK CLI from GitHub Releases (for Linux and Windows).
-/// macOS uses Homebrew instead.
+/// Install CK CLI from GitHub Releases.
+/// On macOS, this is used when Homebrew is not available.
 pub async fn install_cli_from_github(platform_info: &PlatformInfo) -> ActionResult {
     let target_triple = match (platform_info.platform, platform_info.arch.as_str()) {
         (Platform::Linux, "x86_64") => "x86_64-unknown-linux-gnu",
         (Platform::Linux, "aarch64") => "aarch64-unknown-linux-gnu",
         (Platform::Windows, "x86_64") => "x86_64-pc-windows-msvc",
         (Platform::Windows, "aarch64") => "aarch64-pc-windows-msvc",
-        (Platform::MacOS, _) => {
-            return ActionResult::failure("Use Homebrew to install on macOS");
-        }
+        (Platform::MacOS, "x86_64") => "x86_64-apple-darwin",
+        (Platform::MacOS, "aarch64") => "aarch64-apple-darwin",
         _ => {
             return ActionResult::failure(format!(
                 "Unsupported platform/arch: {:?}/{}",
@@ -59,7 +58,7 @@ pub async fn install_cli_from_github(platform_info: &PlatformInfo) -> ActionResu
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))
         .unwrap_or_else(|_| reqwest::Client::new());
-    let releases_url = "https://api.github.com/repos/CandleKeepAgents/candlekeep-cloud/releases";
+    let releases_url = "https://api.github.com/repos/CandleKeepAgents/candlekeep-cli/releases";
     let response = match client
         .get(releases_url)
         .header("User-Agent", "candlekeep-desktop")
@@ -82,11 +81,11 @@ pub async fn install_cli_from_github(platform_info: &PlatformInfo) -> ActionResu
         Err(e) => return ActionResult::failure(format!("Failed to parse releases: {}", e)),
     };
 
-    // Find latest cli-v* release
+    // Find latest v* release
     let release = match releases.iter().find(|r| {
         r.get("tag_name")
             .and_then(|t| t.as_str())
-            .map(|t| t.starts_with("cli-v"))
+            .map(|t| t.starts_with("v"))
             .unwrap_or(false)
     }) {
         Some(r) => r,

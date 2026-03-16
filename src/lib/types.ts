@@ -94,7 +94,6 @@ export type SetupStep =
   | "welcome"
   | "host-picker"
   | "system-check"
-  | "install-homebrew"
   | "install-cli"
   | "authenticate"
   | "install-host"
