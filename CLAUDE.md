@@ -94,6 +94,30 @@ pnpm exec tsc --noEmit  # TypeScript type check
 3. Add a typed wrapper in `src/lib/tauri-commands.ts`
 4. Add any new types to `src/lib/types.ts`
 
+## Release Process
+
+Version is defined in 4 files that must stay in sync:
+- `package.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/Cargo.lock`
+- `src-tauri/tauri.conf.json`
+
+### Steps to release
+1. **Version bump**: Run the GitHub Actions "Version Bump" workflow (`.github/workflows/version-bump.yml`) with the new version — it updates all 4 files and creates a PR on `release/v{X.Y.Z}`
+2. **Merge PR**: Review and merge the version bump PR into `main`
+3. **Tag**: `git tag v{X.Y.Z} && git push origin v{X.Y.Z}`
+4. **Release**: The release workflow (`.github/workflows/release.yml`) triggers automatically on tag push — builds macOS/Linux/Windows, code-signs macOS, and publishes to GitHub Releases with auto-generated changelog from commit messages
+
+No manual CHANGELOG.md — release notes are auto-generated from git log between tags.
+
+### Claude's Release Responsibilities
+When the user asks to publish/release, Claude MUST execute the full release flow — do NOT just list the steps and leave them for the user. After merging the feature PR to main:
+1. Determine the next version by reading the current version from `package.json` and bumping appropriately (patch for fixes, minor for features, major if breaking)
+2. Trigger the Version Bump workflow: `gh workflow run version-bump.yml -f version=X.Y.Z`
+3. Wait for the version bump PR to be created, then merge it: `gh pr merge --squash`
+4. Pull main, tag, and push: `git tag vX.Y.Z && git push origin vX.Y.Z`
+5. Confirm the release workflow started: `gh run list --workflow=release.yml --limit=1`
+
 ## Adding a New Integration
 
 1. Create `src-tauri/src/integrations/new_ide.rs` implementing the `Integration` trait
