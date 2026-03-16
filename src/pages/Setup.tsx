@@ -23,11 +23,9 @@ interface StepState {
 
 export function Setup({ onComplete }: { onComplete: () => void }) {
   const [currentStep, setCurrentStep] = useState<SetupStep>("welcome");
-  const [systemCheck, setSystemCheck] = useState<SystemCheckResult | null>(
-    null,
-  );
+  const [, setSystemCheck] = useState<SystemCheckResult | null>(null);
   const [selectedHosts, setSelectedHosts] = useState<HostKind[]>([]);
-  const [platformInfo, setPlatformInfo] = useState<PlatformInfo | null>(null);
+  const [, setPlatformInfo] = useState<PlatformInfo | null>(null);
   const [stepState, setStepState] = useState<StepState>({
     status: "pending",
     message: "",
@@ -46,8 +44,6 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
   useEffect(() => {
     cmd.getPlatformInfo().then(setPlatformInfo).catch(console.error);
   }, []);
-
-  const isMacOS = platformInfo?.platform === "macos";
 
   const runSystemCheck = useCallback(async () => {
     setStepState({ status: "running", message: "Checking your system..." });
@@ -82,10 +78,7 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
       setStepState({ status: "success", message: "System check complete" });
 
       // Auto-advance to first needed step
-      const isMac = platform.platform === "macos";
-      if (isMac && !result.homebrew) {
-        setCurrentStep("install-homebrew");
-      } else if (!result.cliInstalled) {
+      if (!result.cliInstalled) {
         setCurrentStep("install-cli");
       } else if (!result.authenticated) {
         setCurrentStep("authenticate");
@@ -101,24 +94,6 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
       });
     }
   }, [selectedHosts]);
-
-  const handleInstallHomebrew = async () => {
-    setStepState({
-      status: "running",
-      message: "Installing Homebrew... this may take a few minutes",
-    });
-    try {
-      await cmd.installHomebrew();
-      setStepState({ status: "success", message: "Homebrew installed!" });
-      if (!systemCheck?.cliInstalled) {
-        setCurrentStep("install-cli");
-      } else {
-        setCurrentStep("authenticate");
-      }
-    } catch (err) {
-      setStepState({ status: "error", message: `${err}` });
-    }
-  };
 
   const handleInstallCli = async () => {
     setStepState({
@@ -369,24 +344,10 @@ export function Setup({ onComplete }: { onComplete: () => void }) {
         </div>
       )}
 
-      {currentStep === "install-homebrew" && isMacOS && (
-        <StepCard
-          title="Install Homebrew"
-          description="Homebrew is required to install the CandleKeep CLI on macOS."
-          actionLabel="Install Homebrew"
-          onAction={handleInstallHomebrew}
-          disabled={stepState.status === "running"}
-        />
-      )}
-
       {currentStep === "install-cli" && (
         <StepCard
           title="Install CandleKeep CLI"
-          description={
-            isMacOS
-              ? "The CLI manages your library and handles authentication. Installing via Homebrew."
-              : "The CLI manages your library and handles authentication. Downloading from GitHub."
-          }
+          description="The CLI manages your library and handles authentication."
           actionLabel="Install CLI"
           onAction={handleInstallCli}
           disabled={stepState.status === "running"}

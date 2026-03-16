@@ -50,7 +50,7 @@ impl PlatformInfo {
 
         let paths = match platform {
             Platform::MacOS => PlatformPaths {
-                cli_install_dir: PathBuf::from("/usr/local/bin"),
+                cli_install_dir: home.join(".local/bin"),
                 config_dir: home.join(".candlekeep"),
                 extra_bin_dirs: vec![
                     PathBuf::from("/opt/homebrew/bin"),

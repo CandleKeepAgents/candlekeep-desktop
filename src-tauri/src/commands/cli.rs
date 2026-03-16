@@ -33,7 +33,10 @@ fn detect_install_method(path: &PathBuf) -> String {
         "homebrew".to_string()
     } else if path_str.contains(".cargo/bin") {
         "cargo".to_string()
-    } else if path_str.contains("programs\\candlekeep") || path_str.contains("programs/candlekeep") {
+    } else if path_str.contains("programs\\candlekeep")
+        || path_str.contains("programs/candlekeep")
+        || path_str.contains(".local/bin")
+    {
         "github-release".to_string()
     } else {
         "manual".to_string()
@@ -115,9 +118,9 @@ pub async fn get_latest_cli_version() -> Result<Option<String>, String> {
         }
     }
 
-    // Fallback: check GitHub releases for latest cli-v* tag
+    // Fallback: check GitHub releases for latest v* tag
     let client = reqwest::Client::new();
-    let releases_url = "https://api.github.com/repos/CandleKeepAgents/candlekeep-cloud/releases";
+    let releases_url = "https://api.github.com/repos/CandleKeepAgents/candlekeep-cli/releases";
     if let Ok(response) = client
         .get(releases_url)
         .header("User-Agent", "candlekeep-desktop")
@@ -128,7 +131,7 @@ pub async fn get_latest_cli_version() -> Result<Option<String>, String> {
             if let Ok(releases) = response.json::<Vec<serde_json::Value>>().await {
                 for release in &releases {
                     if let Some(tag) = release.get("tag_name").and_then(|t| t.as_str()) {
-                        if let Some(version) = tag.strip_prefix("cli-v") {
+                        if let Some(version) = tag.strip_prefix("v") {
                             return Ok(Some(version.to_string()));
                         }
                     }
@@ -148,24 +151,39 @@ pub async fn install_cli() -> Result<String, String> {
 
     match platform_info.platform {
         Platform::MacOS => {
-            // Use Homebrew on macOS
-            let output = shell::shell_command(
-                "brew install CandleKeepAgents/candlekeep/candlekeep-cli",
-                &path_env,
-            )
-            .output()
-            .map_err(|e| {
-                error!("Failed to start CLI installation: {}", e);
-                format!("Failed to start CLI installation: {}", e)
-            })?;
+            // Prefer Homebrew if available, fall back to direct download
+            let brew_available = std::path::Path::new("/opt/homebrew/bin/brew").exists()
+                || std::path::Path::new("/usr/local/bin/brew").exists();
 
-            if output.status.success() {
-                info!("CLI installed successfully via Homebrew");
-                Ok("CLI installed successfully".to_string())
+            if brew_available {
+                let output = shell::shell_command(
+                    "brew install CandleKeepAgents/candlekeep/candlekeep-cli",
+                    &path_env,
+                )
+                .output()
+                .map_err(|e| {
+                    error!("Failed to start CLI installation: {}", e);
+                    format!("Failed to start CLI installation: {}", e)
+                })?;
+
+                if output.status.success() {
+                    info!("CLI installed successfully via Homebrew");
+                    Ok("CLI installed successfully".to_string())
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    error!("CLI installation failed: {}", stderr);
+                    Err(format!("CLI installation failed: {}", stderr))
+                }
             } else {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                error!("CLI installation failed: {}", stderr);
-                Err(format!("CLI installation failed: {}", stderr))
+                // No Homebrew — download from GitHub Releases
+                let result = installer::install_cli_from_github(&platform_info).await;
+                if result.ok {
+                    info!("CLI installed from GitHub Releases (no Homebrew)");
+                    Ok(result.message)
+                } else {
+                    error!("CLI install failed: {}", result.message);
+                    Err(result.message)
+                }
             }
         }
         Platform::Linux | Platform::Windows => {
@@ -190,23 +208,40 @@ pub async fn update_cli() -> Result<String, String> {
 
     match platform_info.platform {
         Platform::MacOS => {
-            let output = shell::shell_command(
-                "brew upgrade candlekeep-cli",
-                &path_env,
-            )
-            .output()
-            .map_err(|e| {
-                error!("Failed to start CLI update: {}", e);
-                format!("Failed to start CLI update: {}", e)
-            })?;
+            // Route update by how CLI was originally installed
+            let install_method = find_cli_path()
+                .map(|p| detect_install_method(&p))
+                .unwrap_or_else(|| "manual".to_string());
 
-            if output.status.success() {
-                info!("CLI updated successfully");
-                Ok("CLI updated successfully".to_string())
+            if install_method == "homebrew" {
+                let output = shell::shell_command(
+                    "brew upgrade candlekeep-cli",
+                    &path_env,
+                )
+                .output()
+                .map_err(|e| {
+                    error!("Failed to start CLI update: {}", e);
+                    format!("Failed to start CLI update: {}", e)
+                })?;
+
+                if output.status.success() {
+                    info!("CLI updated successfully via Homebrew");
+                    Ok("CLI updated successfully".to_string())
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    error!("CLI update failed: {}", stderr);
+                    Err(format!("CLI update failed: {}", stderr))
+                }
             } else {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                error!("CLI update failed: {}", stderr);
-                Err(format!("CLI update failed: {}", stderr))
+                // github-release, cargo, or manual — re-download from GitHub
+                let result = installer::install_cli_from_github(&platform_info).await;
+                if result.ok {
+                    info!("CLI updated from GitHub Releases");
+                    Ok(result.message)
+                } else {
+                    error!("CLI update failed: {}", result.message);
+                    Err(result.message)
+                }
             }
         }
         Platform::Linux | Platform::Windows => {
