@@ -4,6 +4,7 @@ mod platform;
 mod state;
 mod updater;
 
+use tauri::Manager;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use tracing_appender::rolling;
 
@@ -39,14 +40,32 @@ pub fn run() {
         log_dir.display()
     );
 
+    #[tauri::command]
+    fn mark_setup_complete() -> Result<(), String> {
+        let mut app_state = state::AppState::load();
+        app_state.setup_completed = true;
+        app_state.save()
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             platform::tray::setup_tray(app)?;
+
+            let app_state = state::AppState::load();
+            if !app_state.setup_completed {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // State commands
+            mark_setup_complete,
             // System / platform commands
             commands::system::check_homebrew,
             commands::system::check_cargo,
